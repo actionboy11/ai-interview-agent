@@ -11,6 +11,7 @@ import interview.guide.modules.resume.repository.ResumeAnalysisRepository;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -112,6 +113,91 @@ public class ResumePersistenceService {
             log.error("序列化评测结果失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "保存评测结果失败");
         }
+    }
+
+    public boolean isAnalysisMessageCompleted(String messageId) {
+        return analysisRepository.existsByAnalysisMessageId(messageId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markAnalysisProcessing(Long resumeId) {
+        updateAnalysisStatus(
+            resumeId,
+            interview.guide.common.model.AsyncTaskStatus.PROCESSING,
+            null
+        );
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markAnalysisFailed(Long resumeId, String error) {
+        updateAnalysisStatus(
+            resumeId,
+            interview.guide.common.model.AsyncTaskStatus.FAILED,
+            truncateError(error)
+        );
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public CompletionResult completeAnalysis(
+        Long resumeId,
+        String messageId,
+        ResumeAnalysisResponse analysis
+    ) {
+        if (analysisRepository.existsByAnalysisMessageId(messageId)) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
+
+        ResumeEntity resume = requireResume(resumeId);
+        try {
+            ResumeAnalysisEntity entity = resumeMapper.toAnalysisEntity(analysis);
+            entity.setResume(resume);
+            entity.setAnalysisMessageId(messageId);
+            entity.setStrengthsJson(objectMapper.writeValueAsString(analysis.strengths()));
+            entity.setSuggestionsJson(objectMapper.writeValueAsString(analysis.suggestions()));
+            analysisRepository.save(entity);
+
+            resume.setAnalyzeStatus(interview.guide.common.model.AsyncTaskStatus.COMPLETED);
+            resume.setAnalyzeError(null);
+            resumeRepository.save(resume);
+            return CompletionResult.CREATED;
+        } catch (DataIntegrityViolationException exception) {
+            log.info("Duplicate resume analysis message ignored: messageId={}", messageId);
+            return CompletionResult.ALREADY_COMPLETED;
+        } catch (JacksonException exception) {
+            throw new BusinessException(
+                ErrorCode.RESUME_ANALYSIS_FAILED,
+                "Failed to persist resume analysis",
+                exception
+            );
+        }
+    }
+
+    private void updateAnalysisStatus(
+        Long resumeId,
+        interview.guide.common.model.AsyncTaskStatus status,
+        String error
+    ) {
+        ResumeEntity resume = requireResume(resumeId);
+        resume.setAnalyzeStatus(status);
+        resume.setAnalyzeError(error);
+        resumeRepository.save(resume);
+    }
+
+    private ResumeEntity requireResume(Long resumeId) {
+        return resumeRepository.findById(resumeId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND));
+    }
+
+    private String truncateError(String error) {
+        if (error == null || error.length() <= 500) {
+            return error;
+        }
+        return error.substring(0, 500);
+    }
+
+    public enum CompletionResult {
+        CREATED,
+        ALREADY_COMPLETED
     }
     
     /**

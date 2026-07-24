@@ -12,6 +12,8 @@ import java.util.List;
  */
 @Repository
 public interface ResumeAnalysisRepository extends JpaRepository<ResumeAnalysisEntity, Long> {
+
+    boolean existsByAnalysisMessageId(String analysisMessageId);
     
     /**
      * 根据简历查找所有评测记录

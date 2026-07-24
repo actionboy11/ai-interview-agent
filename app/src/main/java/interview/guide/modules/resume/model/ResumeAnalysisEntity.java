@@ -15,6 +15,9 @@ public class ResumeAnalysisEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "analysis_message_id", unique = true, length = 36)
+    private String analysisMessageId;
     
     // 关联的简历
     @ManyToOne(fetch = FetchType.LAZY)
@@ -59,6 +62,14 @@ public class ResumeAnalysisEntity {
     
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getAnalysisMessageId() {
+        return analysisMessageId;
+    }
+
+    public void setAnalysisMessageId(String analysisMessageId) {
+        this.analysisMessageId = analysisMessageId;
     }
     
     public ResumeEntity getResume() {
