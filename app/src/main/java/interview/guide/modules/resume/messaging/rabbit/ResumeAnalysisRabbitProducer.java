@@ -55,14 +55,49 @@ public class ResumeAnalysisRabbitProducer implements ResumeAnalysisTaskPublisher
             OffsetDateTime.now(),
             messageId
         );
-        publishConfirmed(properties.exchange(), properties.routingKey(), message);
+        publishConfirmed(properties.exchange(), properties.routingKey(), message, null);
+        return new PublishReceipt(messageId);
+    }
+
+    public PublishReceipt publishRetry(
+        ResumeAnalysisMessage failed,
+        ResumeAnalysisRetryPolicy.RetryDestination destination
+    ) {
+        UUID messageId = UUID.randomUUID();
+        ResumeAnalysisMessage retry = new ResumeAnalysisMessage(
+            messageId,
+            failed.resumeId(),
+            failed.retryCount() + 1,
+            OffsetDateTime.now(),
+            failed.originalMessageId()
+        );
+        publishConfirmed(properties.exchange(), destination.routingKey(), retry, null);
+        return new PublishReceipt(messageId);
+    }
+
+    public PublishReceipt publishDead(ResumeAnalysisMessage failed, String failureReason) {
+        UUID messageId = UUID.randomUUID();
+        ResumeAnalysisMessage dead = new ResumeAnalysisMessage(
+            messageId,
+            failed.resumeId(),
+            failed.retryCount(),
+            OffsetDateTime.now(),
+            failed.originalMessageId()
+        );
+        publishConfirmed(
+            properties.deadExchange(),
+            properties.deadRoutingKey(),
+            dead,
+            truncateHeader(failureReason)
+        );
         return new PublishReceipt(messageId);
     }
 
     private void publishConfirmed(
         String exchange,
         String routingKey,
-        ResumeAnalysisMessage message
+        ResumeAnalysisMessage message,
+        String failureReason
     ) {
         CorrelationData correlation = new CorrelationData(message.messageId().toString());
         rabbitTemplate.convertAndSend(
@@ -72,6 +107,12 @@ public class ResumeAnalysisRabbitProducer implements ResumeAnalysisTaskPublisher
             outbound -> {
                 outbound.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
                 outbound.getMessageProperties().setMessageId(message.messageId().toString());
+                if (failureReason != null) {
+                    outbound.getMessageProperties().setHeader(
+                        "x-resume-analysis-failure",
+                        failureReason
+                    );
+                }
                 return outbound;
             },
             correlation
@@ -106,5 +147,12 @@ public class ResumeAnalysisRabbitProducer implements ResumeAnalysisTaskPublisher
 
     private BusinessException publishFailure(String message) {
         return new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, message);
+    }
+
+    private String truncateHeader(String value) {
+        if (value == null || value.length() <= 500) {
+            return value;
+        }
+        return value.substring(0, 500);
     }
 }
