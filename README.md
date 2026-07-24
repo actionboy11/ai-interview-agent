@@ -1,3 +1,20 @@
+## RabbitMQ 简历分析开发模式
+
+混合开发环境中，PostgreSQL、Redis、对象存储和 RabbitMQ 使用容器运行：
+
+```powershell
+docker compose -f docker-compose.dev.yml up -d
+```
+
+RabbitMQ 管理台为 `http://localhost:15672`，默认开发账号和密码均为
+`interview`。设置 `APP_RESUME_MESSAGING_PROVIDER=rabbitmq` 即启用新链路；
+改为 `redis-stream` 并重启后端即可回退。
+
+简历分析失败后依次进入 10、30、60 秒 TTL 重试队列，最终进入
+`resume.analysis.dead.queue`。可在 Swagger 使用
+`/api/admin/resume-analysis/dead-letters` 查询、查看和重放死信。
+知识库向量化、文字面试评估和语音面试评估仍使用 Redis Stream。
+
 <div align="center">
 
 **智能 AI 面试官平台** - 基于大语言模型的简历分析、模拟面试和 RAG 知识库系统
