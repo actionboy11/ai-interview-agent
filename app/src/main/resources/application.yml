@@ -218,6 +218,17 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:80,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:80}
 
+  voice-evaluation:
+    messaging:
+      provider: ${APP_VOICE_EVALUATION_MESSAGING_PROVIDER:rabbitmq}
+      exchange: voice.evaluation.exchange
+      queue: voice.evaluation.queue
+      routing-key: voice.evaluation
+      dead-exchange: voice.evaluation.dead.exchange
+      dead-queue: voice.evaluation.dead.queue
+      dead-routing-key: voice.evaluation.dead
+      retry-delays: 10s,30s,60s
+
   # Voice interview configuration
   voice-interview:
     # Phase duration settings (minutes)

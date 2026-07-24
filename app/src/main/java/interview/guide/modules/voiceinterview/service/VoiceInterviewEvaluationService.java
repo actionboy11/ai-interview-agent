@@ -6,6 +6,8 @@ import interview.guide.common.evaluation.QaRecord;
 import interview.guide.common.evaluation.UnifiedEvaluationService;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.modules.interview.skill.InterviewSkillService;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationDetailDTO;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationDetailDTO.AnswerDetail;
@@ -44,12 +46,20 @@ public class VoiceInterviewEvaluationService {
     private final VoiceInterviewSessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
     private final InterviewSkillService skillService;
+    private final TransactionalExecutor transactionalExecutor;
 
     /**
      * 生成语音面试评估（由异步消费者调用）
      * LLM 调用在事务外执行，仅 DB 写入在事务内
      */
     public void generateEvaluation(Long sessionId) {
+        generateEvaluation(sessionId, null);
+    }
+
+    public CompletionResult generateEvaluation(Long sessionId, String messageId) {
+        if (messageId != null && evaluationRepository.existsByEvaluationMessageId(messageId)) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
         try {
             log.info("开始生成语音面试评估: sessionId={}", sessionId);
 
@@ -59,8 +69,10 @@ public class VoiceInterviewEvaluationService {
 
             if (messages.isEmpty()) {
                 log.warn("语音面试会话无对话记录，生成空评估结果: sessionId={}", sessionId);
-                saveEmptyEvaluationTransactional(sessionId, session);
-                return;
+                transactionalExecutor.run(
+                    () -> saveEmptyEvaluationTransactional(sessionId, session, messageId)
+                );
+                return CompletionResult.CREATED;
             }
 
             List<QaRecord> qaRecords = buildQaRecords(messages);
@@ -73,7 +85,10 @@ public class VoiceInterviewEvaluationService {
             EvaluationReport report = unifiedEvaluationService.evaluate(
                 chatClient, sessionIdStr, qaRecords, null, referenceContext);
 
-            saveEvaluationTransactional(sessionId, session, report);
+            transactionalExecutor.run(
+                () -> saveEvaluationTransactional(sessionId, session, report, messageId)
+            );
+            return CompletionResult.CREATED;
 
         } catch (BusinessException e) {
             throw e;
@@ -163,12 +178,23 @@ public class VoiceInterviewEvaluationService {
     @Transactional
     public void saveEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session,
                                  EvaluationReport report) {
+        saveEvaluationTransactional(sessionId, session, report, null);
+    }
+
+    @Transactional
+    public void saveEvaluationTransactional(
+        Long sessionId,
+        VoiceInterviewSessionEntity session,
+        EvaluationReport report,
+        String messageId
+    ) {
         try {
             List<EvaluationReport.QuestionEvaluation> questionItems = report.questionDetails();
             List<EvaluationReport.ReferenceAnswer> refAnswerItems = report.referenceAnswers();
 
             VoiceInterviewEvaluationEntity entity = VoiceInterviewEvaluationEntity.builder()
                 .sessionId(sessionId)
+                .evaluationMessageId(messageId)
                 .overallScore(report.overallScore())
                 .overallFeedback(report.overallFeedback())
                 .questionEvaluationsJson(objectMapper.writeValueAsString(questionItems))
@@ -180,6 +206,9 @@ public class VoiceInterviewEvaluationService {
                 .build();
 
             evaluationRepository.save(entity);
+            session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+            session.setEvaluateError(null);
+            sessionRepository.save(session);
             log.info("评估结果已保存: sessionId={}, score={}", sessionId, entity.getOverallScore());
         } catch (Exception e) {
             log.error("保存评估结果失败: sessionId={}", sessionId, e);
@@ -190,11 +219,21 @@ public class VoiceInterviewEvaluationService {
 
     @Transactional
     public void saveEmptyEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session) {
+        saveEmptyEvaluationTransactional(sessionId, session, null);
+    }
+
+    @Transactional
+    public void saveEmptyEvaluationTransactional(
+        Long sessionId,
+        VoiceInterviewSessionEntity session,
+        String messageId
+    ) {
         try {
             VoiceInterviewEvaluationEntity entity = evaluationRepository.findBySessionId(sessionId)
                 .orElseGet(() -> VoiceInterviewEvaluationEntity.builder().sessionId(sessionId).build());
 
             entity.setOverallScore(0);
+            entity.setEvaluationMessageId(messageId);
             entity.setOverallFeedback("本次语音面试未形成有效对话记录，暂无可评估内容。");
             entity.setQuestionEvaluationsJson("[]");
             entity.setStrengthsJson("[]");
@@ -204,6 +243,9 @@ public class VoiceInterviewEvaluationService {
             entity.setInterviewDate(session.getStartTime());
 
             evaluationRepository.save(entity);
+            session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+            session.setEvaluateError(null);
+            sessionRepository.save(session);
             log.info("空评估结果已保存: sessionId={}", sessionId);
         } catch (Exception e) {
             log.error("保存空评估结果失败: sessionId={}", sessionId, e);
@@ -274,5 +316,10 @@ public class VoiceInterviewEvaluationService {
         return sessionRepository.findById(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
                 "语音面试会话不存在: " + sessionId));
+    }
+
+    public enum CompletionResult {
+        CREATED,
+        ALREADY_COMPLETED
     }
 }

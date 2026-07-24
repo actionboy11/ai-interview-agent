@@ -101,6 +101,10 @@ app:
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174,http://localhost:80
 
+  voice-evaluation:
+    messaging:
+      provider: redis-stream
+
   voice-interview:
     llm-provider: dashscope
 

@@ -12,6 +12,8 @@ import java.util.Optional;
 @Repository
 public interface VoiceInterviewEvaluationRepository extends JpaRepository<VoiceInterviewEvaluationEntity, Long> {
 
+    boolean existsByEvaluationMessageId(String evaluationMessageId);
+
     /**
      * 根据会话ID查找评估结果（一对一关系）
      */

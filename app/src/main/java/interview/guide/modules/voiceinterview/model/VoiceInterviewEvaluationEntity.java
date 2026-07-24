@@ -32,6 +32,9 @@ public class VoiceInterviewEvaluationEntity {
     @Column(name = "session_id", unique = true)
     private Long sessionId;
 
+    @Column(name = "evaluation_message_id", unique = true, length = 36)
+    private String evaluationMessageId;
+
     @Column(name = "overall_score")
     private Integer overallScore;
 

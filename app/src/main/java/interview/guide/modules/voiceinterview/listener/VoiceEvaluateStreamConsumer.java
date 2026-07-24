@@ -9,6 +9,7 @@ import interview.guide.modules.voiceinterview.service.VoiceInterviewEvaluationSe
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -18,6 +19,10 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(
+    name = "app.voice-evaluation.messaging.provider",
+    havingValue = "redis-stream"
+)
 public class VoiceEvaluateStreamConsumer extends AbstractStreamConsumer<VoiceEvaluateStreamConsumer.VoiceEvaluatePayload> {
 
     private final VoiceInterviewService voiceInterviewService;
