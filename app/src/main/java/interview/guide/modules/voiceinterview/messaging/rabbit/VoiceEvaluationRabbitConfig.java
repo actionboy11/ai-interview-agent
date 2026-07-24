@@ -101,7 +101,9 @@ public class VoiceEvaluationRabbitConfig {
 
     @Bean
     MessageConverter voiceEvaluationMessageConverter() {
-        return new JacksonJsonMessageConverter();
+        return new JacksonJsonMessageConverter(
+            "interview.guide.modules.voiceinterview.messaging.rabbit"
+        );
     }
 
     @Bean
