@@ -13,7 +13,19 @@ RabbitMQ 管理台为 `http://localhost:15672`，默认开发账号和密码均�
 简历分析失败后依次进入 10、30、60 秒 TTL 重试队列，最终进入
 `resume.analysis.dead.queue`。可在 Swagger 使用
 `/api/admin/resume-analysis/dead-letters` 查询、查看和重放死信。
-知识库向量化、文字面试评估和语音面试评估仍使用 Redis Stream。
+语音面试评估同样默认使用 RabbitMQ，可通过
+`APP_VOICE_EVALUATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。它使用专属的
+`voice.evaluation.exchange`、`voice.evaluation.queue`、三个 10/30/60 秒 TTL
+重试队列，以及 `voice.evaluation.dead.queue`，不会和简历分析任务相互影响。
+
+语音评估最终失败后会写入 PostgreSQL 死信审计表。可在 Swagger 使用以下接口：
+
+- `GET /api/admin/voice-evaluation/dead-letters`
+- `GET /api/admin/voice-evaluation/dead-letters/{id}`
+- `POST /api/admin/voice-evaluation/dead-letters/{id}/replay`
+
+消息只携带任务标识，不携带音频、对话、提示词或评估内容。消费者采用手动 ACK，
+完成记录以消息 ID 保证幂等。知识库向量化和文字面试评估仍使用 Redis Stream。
 
 <div align="center">
 
