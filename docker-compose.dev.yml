@@ -35,6 +35,23 @@ services:
       timeout: 3s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: interview-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-interview}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-interview}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   rustfs:
     image: rustfs/rustfs:latest
     container_name: interview-rustfs
@@ -61,3 +78,4 @@ volumes:
   postgres_data:
   redis_data:
   rustfs_data:
+  rabbitmq_data:

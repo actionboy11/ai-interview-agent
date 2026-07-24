@@ -31,6 +31,18 @@ spring:
   application:
     name: ai-interview-platform
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:interview}
+    password: ${RABBITMQ_PASSWORD:interview}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: true
+
   # 启用虚拟线程 (Java 21+)
   # 显著提升 I/O 密集型场景的并发能力，特别适合 AI 调用和 SSE 长连接
   threads:
@@ -175,6 +187,15 @@ app:
     evaluation:
       batch-size: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:8}
   resume:
+    messaging:
+      provider: ${APP_RESUME_MESSAGING_PROVIDER:redis-stream}
+      exchange: resume.analysis.exchange
+      queue: resume.analysis.queue
+      routing-key: resume.analysis
+      dead-exchange: resume.analysis.dead.exchange
+      dead-queue: resume.analysis.dead.queue
+      dead-routing-key: resume.analysis.dead
+      retry-delays: 10s,30s,60s
     upload-dir: ${java.io.tmpdir}/ai-interview/resumes
     allowed-types:
       - application/pdf

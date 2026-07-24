@@ -57,6 +57,23 @@ services:
       timeout: 3s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: interview-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-interview}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-interview}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   # =========================================
   # 3. MinIO 对象存储服务
   # -----------------------------------------
@@ -134,6 +151,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       minio:
         condition: service_healthy
       createbuckets:
@@ -150,6 +169,11 @@ services:
       # === Redis 连接 ===
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-interview}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-interview}
+      APP_RESUME_MESSAGING_PROVIDER: ${APP_RESUME_MESSAGING_PROVIDER:-rabbitmq}
       
       # === 对象存储配置 ===
       # 注意：后端在容器内访问 MinIO，使用 http://minio:9000
@@ -195,4 +219,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
   minio_data:
