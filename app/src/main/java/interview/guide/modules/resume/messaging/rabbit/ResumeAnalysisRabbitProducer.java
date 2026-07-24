@@ -12,6 +12,7 @@ import java.util.concurrent.TimeoutException;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,7 @@ public class ResumeAnalysisRabbitProducer implements ResumeAnalysisTaskPublisher
     private final ResumeAnalysisRabbitProperties properties;
     private final Duration confirmTimeout;
 
+    @Autowired
     public ResumeAnalysisRabbitProducer(
         RabbitTemplate resumeAnalysisRabbitTemplate,
         ResumeAnalysisRabbitProperties properties
