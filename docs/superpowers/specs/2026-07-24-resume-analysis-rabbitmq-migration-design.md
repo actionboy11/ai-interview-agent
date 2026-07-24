@@ -167,7 +167,7 @@ Consumer 处理失败后，根据当前 `retryCount` 将新消息发布到对应
 
 数据库约束：
 
-- `resume_analyses.analysis_message_id` 非空。
+- `resume_analyses.analysis_message_id` 对历史记录允许为空，新 RabbitMQ 分析记录必须赋值。
 - `resume_analyses.analysis_message_id` 唯一。
 - 同一条消息重复到达时，不产生第二条分析记录。
 
@@ -214,7 +214,7 @@ RabbitMQ 不适合按业务字段分页检索消息，因此最终死信由专�
 | `retry_count` | 最终重试次数 |
 | `failure_reason` | 失败原因，限制长度 |
 | `payload_json` | 原始消息 JSON |
-| `status` | `PENDING`、`REPLAYED` 或 `RESOLVED` |
+| `status` | `PENDING`、`REPLAYING`、`REPLAYED` 或 `RESOLVED` |
 | `failed_at` | 进入死信时间 |
 | `replayed_at` | 重放时间，可空 |
 | `replay_message_id` | 重放生成的新消息 ID，可空 |
@@ -232,13 +232,13 @@ POST /api/admin/resume-analysis/dead-letters/{id}/replay
 重放操作：
 
 1. 查询并锁定死信记录。
-2. 校验记录状态为 `PENDING`。
+2. 通过条件更新将记录从 `PENDING` 原子切换为 `REPLAYING`；未抢占成功则拒绝重复重放。
 3. 查询简历。
 4. 简历不存在时返回业务错误。
 5. 简历已完成时将记录标记为 `RESOLVED`。
 6. 其他状态下将简历重置为 `PENDING`。
 7. 发布具有新 `messageId` 的主队列消息。
-8. Broker Confirm 成功后将死信记录标记为 `REPLAYED`。
+8. Broker Confirm 成功后将死信记录标记为 `REPLAYED`；发布失败则恢复为 `PENDING`。
 
 ## 11. 代码边界
 
@@ -312,7 +312,7 @@ RabbitMQ 本地端口：
 - 数据库失败：不 ACK，由 Broker 重新投递。
 - 重试消息发布失败：不 ACK 原消息。
 - 死信持久化失败：不 ACK 死信消息。
-- 重放发布失败：保留 `PENDING`，不更新为 `REPLAYED`。
+- 重放发布失败：将 `REPLAYING` 恢复为 `PENDING`，不更新为 `REPLAYED`。
 - 错误信息写入数据库前必须截断，避免超长异常破坏持久化。
 
 ## 14. 测试策略
@@ -331,7 +331,7 @@ RabbitMQ 本地端口：
 - `original_message_id` 唯一约束。
 - 状态和 `resumeId` 分页查询。
 - `analysis_message_id` 唯一约束。
-- 死信状态从 `PENDING` 到 `REPLAYED` 或 `RESOLVED`。
+- 死信状态按 `PENDING -> REPLAYING -> REPLAYED` 或 `PENDING -> RESOLVED` 转换。
 
 ### 14.3 RabbitMQ 集成测试
 
