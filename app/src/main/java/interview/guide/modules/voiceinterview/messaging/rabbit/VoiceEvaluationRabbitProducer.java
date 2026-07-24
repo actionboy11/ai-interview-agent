@@ -61,6 +61,40 @@ public class VoiceEvaluationRabbitProducer implements VoiceEvaluationTaskPublish
         return new PublishReceipt(messageId);
     }
 
+    public PublishReceipt publishRetry(
+        VoiceEvaluationMessage failed,
+        VoiceEvaluationRetryPolicy.RetryDestination destination
+    ) {
+        UUID messageId = UUID.randomUUID();
+        VoiceEvaluationMessage retry = new VoiceEvaluationMessage(
+            messageId,
+            failed.sessionId(),
+            failed.retryCount() + 1,
+            OffsetDateTime.now(),
+            failed.originalMessageId()
+        );
+        publishConfirmed(properties.exchange(), destination.routingKey(), retry, null);
+        return new PublishReceipt(messageId);
+    }
+
+    public PublishReceipt publishDead(VoiceEvaluationMessage failed, String failureReason) {
+        UUID messageId = UUID.randomUUID();
+        VoiceEvaluationMessage dead = new VoiceEvaluationMessage(
+            messageId,
+            failed.sessionId(),
+            failed.retryCount(),
+            OffsetDateTime.now(),
+            failed.originalMessageId()
+        );
+        publishConfirmed(
+            properties.deadExchange(),
+            properties.deadRoutingKey(),
+            dead,
+            truncateHeader(failureReason)
+        );
+        return new PublishReceipt(messageId);
+    }
+
     private void publishConfirmed(
         String exchange,
         String routingKey,
@@ -115,5 +149,12 @@ public class VoiceEvaluationRabbitProducer implements VoiceEvaluationTaskPublish
             "RabbitMQ voice evaluation confirmation failed",
             exception
         );
+    }
+
+    private String truncateHeader(String value) {
+        if (value == null || value.length() <= 500) {
+            return value;
+        }
+        return value.substring(0, 500);
     }
 }
