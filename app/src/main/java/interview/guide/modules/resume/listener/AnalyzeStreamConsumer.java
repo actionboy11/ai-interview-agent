@@ -11,6 +11,7 @@ import interview.guide.modules.resume.service.ResumeGradingService;
 import interview.guide.modules.resume.service.ResumePersistenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -21,6 +22,11 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(
+    name = "app.resume.messaging.provider",
+    havingValue = "redis-stream",
+    matchIfMissing = true
+)
 public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamConsumer.AnalyzePayload> {
 
     private final ResumeGradingService gradingService;

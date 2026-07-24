@@ -5,11 +5,14 @@ import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.RedisService;
+import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 简历分析任务生产者
@@ -17,7 +20,14 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class AnalyzeStreamProducer extends AbstractStreamProducer<AnalyzeStreamProducer.AnalyzeTaskPayload> {
+@ConditionalOnProperty(
+    name = "app.resume.messaging.provider",
+    havingValue = "redis-stream",
+    matchIfMissing = true
+)
+public class AnalyzeStreamProducer
+    extends AbstractStreamProducer<AnalyzeStreamProducer.AnalyzeTaskPayload>
+    implements ResumeAnalysisTaskPublisher {
 
     private final ResumeRepository resumeRepository;
     private final TransactionalExecutor transactionalExecutor;
@@ -42,6 +52,15 @@ public class AnalyzeStreamProducer extends AbstractStreamProducer<AnalyzeStreamP
      */
     public void sendAnalyzeTask(Long resumeId, String content) {
         sendTask(new AnalyzeTaskPayload(resumeId, content));
+    }
+
+    @Override
+    public PublishReceipt publish(Long resumeId) {
+        String content = resumeRepository.findById(resumeId)
+            .map(resume -> resume.getResumeText())
+            .orElseThrow(() -> new IllegalArgumentException("Resume not found: " + resumeId));
+        sendAnalyzeTask(resumeId, content);
+        return new PublishReceipt(UUID.randomUUID());
     }
 
     @Override

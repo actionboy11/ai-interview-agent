@@ -8,7 +8,7 @@ import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
-import interview.guide.modules.resume.listener.AnalyzeStreamProducer;
+import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +33,7 @@ public class ResumeUploadService {
     private final ResumePersistenceService persistenceService;
     private final AppConfigProperties appConfig;
     private final FileValidationService fileValidationService;
-    private final AnalyzeStreamProducer analyzeStreamProducer;
+    private final ResumeAnalysisTaskPublisher analysisTaskPublisher;
     private final ResumeRepository resumeRepository;
     private final TransactionalExecutor transactionalExecutor;
 
@@ -88,7 +88,7 @@ public class ResumeUploadService {
         ResumeEntity savedResume = persistenceService.saveResume(file, resumeText, fileKey, fileUrl);
 
         // 7. 发送分析任务到 Redis Stream（异步处理）
-        analyzeStreamProducer.sendAnalyzeTask(savedResume.getId(), resumeText);
+        analysisTaskPublisher.publish(savedResume.getId());
 
         long totalTime = System.currentTimeMillis() - startTime;
         log.info("简历上传处理完成: {}, resumeId={} - 总耗时: {}ms (解析+存储+入库)",
@@ -191,7 +191,7 @@ public class ResumeUploadService {
             () -> updateResumeForReanalysis(resumeId, taskContent, shouldCacheResumeText));
 
         // 事务提交后再发送分析任务到 Stream
-        analyzeStreamProducer.sendAnalyzeTask(resumeId, taskContent);
+        analysisTaskPublisher.publish(resumeId);
 
         log.info("重新分析任务已发送: resumeId={}", resumeId);
     }
