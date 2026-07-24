@@ -5,19 +5,28 @@ import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.RedisService;
+import interview.guide.modules.voiceinterview.messaging.VoiceEvaluationTaskPublisher;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 语音面试评估任务生产者
  */
 @Slf4j
 @Component
-public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> {
+@ConditionalOnProperty(
+    name = "app.voice-evaluation.messaging.provider",
+    havingValue = "redis-stream"
+)
+public class VoiceEvaluateStreamProducer
+    extends AbstractStreamProducer<String>
+    implements VoiceEvaluationTaskPublisher {
 
     private final VoiceInterviewService voiceInterviewService;
     private final TransactionalExecutor transactionalExecutor;
@@ -32,6 +41,12 @@ public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> 
 
     public void sendEvaluateTask(String sessionId) {
         sendTask(sessionId);
+    }
+
+    @Override
+    public PublishReceipt publish(Long sessionId) {
+        sendEvaluateTask(sessionId.toString());
+        return new PublishReceipt(UUID.randomUUID());
     }
 
     @Override

@@ -10,7 +10,7 @@ import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
 import interview.guide.modules.voiceinterview.dto.SessionMetaDTO;
 import interview.guide.modules.voiceinterview.dto.SessionResponseDTO;
-import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
+import interview.guide.modules.voiceinterview.messaging.VoiceEvaluationTaskPublisher;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionStatus;
@@ -52,7 +52,7 @@ public class VoiceInterviewService {
     private final VoiceInterviewEvaluationRepository evaluationRepository;
     private final RedissonClient redissonClient;
     private final VoiceInterviewProperties properties;
-    private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
+    private final VoiceEvaluationTaskPublisher voiceEvaluationTaskPublisher;
     private final LlmProviderRegistry llmProviderRegistry;
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
@@ -587,7 +587,19 @@ public class VoiceInterviewService {
     }
 
     private void sendEvaluateTaskAfterCommit(Long sessionId) {
-        Runnable sendTask = () -> voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
+        Runnable sendTask = () -> {
+            try {
+                voiceEvaluationTaskPublisher.publish(sessionId);
+            } catch (RuntimeException exception) {
+                String message = "Evaluation publish failed: " + exception.getMessage();
+                updateEvaluateStatus(
+                    sessionId,
+                    AsyncTaskStatus.FAILED,
+                    message.length() > 500 ? message.substring(0, 500) : message
+                );
+                log.error("Failed to publish voice evaluation: sessionId={}", sessionId, exception);
+            }
+        };
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             sendTask.run();
             return;
