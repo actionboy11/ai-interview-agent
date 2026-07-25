@@ -27,6 +27,25 @@ RabbitMQ 管理台为 `http://localhost:15672`，默认开发账号和密码均�
 消息只携带任务标识，不携带音频、对话、提示词或评估内容。消费者采用手动 ACK，
 完成记录以消息 ID 保证幂等。知识库向量化和文字面试评估仍使用 Redis Stream。
 
+文字面试评估现在也默认使用 RabbitMQ，可通过
+`APP_INTERVIEW_EVALUATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。专属资源为：
+
+- `interview.evaluation.exchange`
+- `interview.evaluation.queue`
+- `interview.evaluation.queue.retry.10s`
+- `interview.evaluation.queue.retry.30s`
+- `interview.evaluation.queue.retry.60s`
+- `interview.evaluation.dead.queue`
+
+最终失败记录写入 PostgreSQL，可通过以下管理接口查询和重放：
+
+- `GET /api/admin/interview-evaluation/dead-letters`
+- `GET /api/admin/interview-evaluation/dead-letters/{id}`
+- `POST /api/admin/interview-evaluation/dead-letters/{id}/replay`
+
+文字评估消息仅携带会话和消息标识，题目、回答、简历和报告内容均从数据库
+读取。知识库向量化仍使用 Redis Stream。
+
 <div align="center">
 
 **智能 AI 面试官平台** - 基于大语言模型的简历分析、模拟面试和 RAG 知识库系统

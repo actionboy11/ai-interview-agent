@@ -105,6 +105,10 @@ app:
     messaging:
       provider: redis-stream
 
+  interview-evaluation:
+    messaging:
+      provider: redis-stream
+
   voice-interview:
     llm-provider: dashscope
 
