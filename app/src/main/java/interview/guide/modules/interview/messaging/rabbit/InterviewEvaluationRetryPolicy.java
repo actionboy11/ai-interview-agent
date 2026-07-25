@@ -1,9 +1,15 @@
 package interview.guide.modules.interview.messaging.rabbit;
 
 import java.time.Duration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+    name = "app.interview-evaluation.messaging.provider",
+    havingValue = "rabbitmq",
+    matchIfMissing = true
+)
 public class InterviewEvaluationRetryPolicy {
 
   private final InterviewEvaluationRabbitProperties properties;
