@@ -72,6 +72,9 @@ public class KnowledgeBaseEntity {
 
     // 向量分块数量
     private Integer chunkCount = 0;
+
+    @Column(unique = true, length = 36)
+    private String vectorizationMessageId;
     
     @PrePersist
     protected void onCreate() {
@@ -217,6 +220,14 @@ public class KnowledgeBaseEntity {
 
     public void setChunkCount(Integer chunkCount) {
         this.chunkCount = chunkCount;
+    }
+
+    public String getVectorizationMessageId() {
+        return vectorizationMessageId;
+    }
+
+    public void setVectorizationMessageId(String vectorizationMessageId) {
+        this.vectorizationMessageId = vectorizationMessageId;
     }
 }
 

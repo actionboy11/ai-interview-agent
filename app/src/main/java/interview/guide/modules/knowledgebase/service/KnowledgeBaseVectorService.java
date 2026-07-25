@@ -61,7 +61,7 @@ public class KnowledgeBaseVectorService {
      * @param knowledgeBaseId 知识库ID
      * @param content 知识库文本内容
      */
-    public void vectorizeAndStore(Long knowledgeBaseId, String content) {
+    public int vectorizeAndStore(Long knowledgeBaseId, String content) {
         String jobId = null;
         try {
             if (knowledgeBaseId == null) {
@@ -96,6 +96,7 @@ public class KnowledgeBaseVectorService {
             activateVectorJob(knowledgeBaseId, jobId);
             log.info("知识库向量化完成: kbId={}, jobId={}, chunks={}, batches={}",
                     knowledgeBaseId, jobId, totalChunks, batchCount);
+            return totalChunks;
         } catch (Exception e) {
             cleanupPendingVectorJob(knowledgeBaseId, jobId);
             log.error("向量化知识库失败: kbId={}, jobId={}, error={}",

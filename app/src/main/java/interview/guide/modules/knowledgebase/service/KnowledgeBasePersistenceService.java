@@ -95,6 +95,35 @@ public class KnowledgeBasePersistenceService {
     /**
      * 从文件名提取知识库名称（去除扩展名）
      */
+    @Transactional(rollbackFor = Exception.class)
+    public CompletionResult completeVectorization(
+        Long knowledgeBaseId,
+        int chunkCount,
+        String messageId
+    ) {
+        KnowledgeBaseEntity knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId)
+            .orElse(null);
+        if (knowledgeBase == null) {
+            return CompletionResult.KNOWLEDGE_BASE_MISSING;
+        }
+        if (knowledgeBase.getVectorStatus() == VectorStatus.COMPLETED
+            || knowledgeBaseRepository.existsByVectorizationMessageId(messageId)) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
+        knowledgeBase.setVectorStatus(VectorStatus.COMPLETED);
+        knowledgeBase.setVectorError(null);
+        knowledgeBase.setChunkCount(chunkCount);
+        knowledgeBase.setVectorizationMessageId(messageId);
+        knowledgeBaseRepository.save(knowledgeBase);
+        return CompletionResult.COMPLETED;
+    }
+
+    public enum CompletionResult {
+        COMPLETED,
+        ALREADY_COMPLETED,
+        KNOWLEDGE_BASE_MISSING
+    }
+
     private String extractNameFromFilename(String filename) {
         if (filename == null || filename.isEmpty()) {
             return "未命名知识库";

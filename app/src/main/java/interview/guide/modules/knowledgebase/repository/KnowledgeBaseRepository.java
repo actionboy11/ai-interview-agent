@@ -27,6 +27,8 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
      */
     boolean existsByFileHash(String fileHash);
 
+    boolean existsByVectorizationMessageId(String vectorizationMessageId);
+
     /**
      * 按上传时间倒序查找所有知识库
      */
