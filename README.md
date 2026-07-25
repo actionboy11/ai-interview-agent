@@ -46,6 +46,18 @@ RabbitMQ 管理台为 `http://localhost:15672`，默认开发账号和密码均�
 文字评估消息仅携带会话和消息标识，题目、回答、简历和报告内容均从数据库
 读取。知识库向量化仍使用 Redis Stream。
 
+知识库向量化现在默认使用 RabbitMQ。消息只携带 `knowledgeBaseId`，消费端根据
+数据库中的 `storageKey` 从 RustFS 重新下载并解析原文件，避免在消息体中传输大文本。
+可通过 `APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。
+
+- 主队列：`knowledge.vectorization.queue`
+- 重试队列：10/30/60 秒 TTL
+- 死信队列：`knowledge.vectorization.dead.queue`
+- 死信管理：`/api/admin/knowledge-vectorization/dead-letters`
+
+消费者使用手动 ACK，完成记录通过消息 ID 保证幂等；最终失败会写入 PostgreSQL，
+可通过管理接口查询和重放。
+
 <div align="center">
 
 **智能 AI 面试官平台** - 基于大语言模型的简历分析、模拟面试和 RAG 知识库系统
