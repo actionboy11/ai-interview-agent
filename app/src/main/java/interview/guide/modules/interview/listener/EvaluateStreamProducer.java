@@ -6,7 +6,10 @@ import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -17,7 +20,13 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
+@ConditionalOnProperty(
+    name = "app.interview-evaluation.messaging.provider",
+    havingValue = "redis-stream"
+)
+public class EvaluateStreamProducer
+    extends AbstractStreamProducer<String>
+    implements InterviewEvaluationTaskPublisher {
 
     private final InterviewSessionRepository sessionRepository;
     private final TransactionalExecutor transactionalExecutor;
@@ -39,6 +48,12 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
      */
     public void sendEvaluateTask(String sessionId) {
         sendTask(sessionId);
+    }
+
+    @Override
+    public PublishReceipt publish(String sessionId) {
+        sendEvaluateTask(sessionId);
+        return new PublishReceipt(UUID.randomUUID());
     }
 
     @Override

@@ -7,7 +7,7 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
-import interview.guide.modules.interview.listener.EvaluateStreamProducer;
+import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
 import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.HistoricalQuestion;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
@@ -44,7 +44,7 @@ public class InterviewSessionService {
     private final InterviewPersistenceService persistenceService;
     private final InterviewSessionCache sessionCache;
     private final ObjectMapper objectMapper;
-    private final EvaluateStreamProducer evaluateStreamProducer;
+    private final InterviewEvaluationTaskPublisher evaluationTaskPublisher;
     private final LlmProviderRegistry llmProviderRegistry;
 
     /**
@@ -359,7 +359,7 @@ public class InterviewSessionService {
 
     private void enqueueEvaluationTask(String sessionId) {
         persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
-        evaluateStreamProducer.sendEvaluateTask(sessionId);
+        publishEvaluationTask(sessionId);
         log.info("会话 {} 已完成所有问题，评估任务已入队", sessionId);
     }
 
@@ -428,9 +428,23 @@ public class InterviewSessionService {
         }
 
         // 发送评估任务到 Redis Stream
-        evaluateStreamProducer.sendEvaluateTask(sessionId);
+        publishEvaluationTask(sessionId);
 
         log.info("会话 {} 提前交卷，评估任务已入队", sessionId);
+    }
+
+    private void publishEvaluationTask(String sessionId) {
+        try {
+            evaluationTaskPublisher.publish(sessionId);
+        } catch (RuntimeException exception) {
+            String error = "Evaluation publish failed: " + exception.getMessage();
+            persistenceService.updateEvaluateStatus(
+                sessionId,
+                AsyncTaskStatus.FAILED,
+                error.length() > 500 ? error.substring(0, 500) : error
+            );
+            log.error("Failed to publish text evaluation: sessionId={}", sessionId, exception);
+        }
     }
 
     /**
