@@ -240,6 +240,17 @@ app:
       dead-routing-key: interview.evaluation.dead
       retry-delays: 10s,30s,60s
 
+  knowledge-vectorization:
+    messaging:
+      provider: ${APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER:rabbitmq}
+      exchange: knowledge.vectorization.exchange
+      queue: knowledge.vectorization.queue
+      routing-key: knowledge.vectorization
+      dead-exchange: knowledge.vectorization.dead.exchange
+      dead-queue: knowledge.vectorization.dead.queue
+      dead-routing-key: knowledge.vectorization.dead
+      retry-delays: 10s,30s,60s
+
   # Voice interview configuration
   voice-interview:
     # Phase duration settings (minutes)

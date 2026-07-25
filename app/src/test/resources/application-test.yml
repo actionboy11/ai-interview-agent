@@ -109,6 +109,10 @@ app:
     messaging:
       provider: redis-stream
 
+  knowledge-vectorization:
+    messaging:
+      provider: redis-stream
+
   voice-interview:
     llm-provider: dashscope
 
