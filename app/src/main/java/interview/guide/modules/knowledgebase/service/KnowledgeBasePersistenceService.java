@@ -96,6 +96,15 @@ public class KnowledgeBasePersistenceService {
      * 从文件名提取知识库名称（去除扩展名）
      */
     @Transactional(rollbackFor = Exception.class)
+    public void updateVectorStatus(Long knowledgeBaseId, VectorStatus status, String error) {
+        KnowledgeBaseEntity knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
+        knowledgeBase.setVectorStatus(status);
+        knowledgeBase.setVectorError(error);
+        knowledgeBaseRepository.save(knowledgeBase);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public CompletionResult completeVectorization(
         Long knowledgeBaseId,
         int chunkCount,
