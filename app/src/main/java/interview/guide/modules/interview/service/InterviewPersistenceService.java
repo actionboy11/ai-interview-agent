@@ -246,6 +246,37 @@ public class InterviewPersistenceService {
     /**
      * 根据会话ID获取会话
      */
+    @Transactional(rollbackFor = Exception.class)
+    public CompletionResult saveReport(
+        String sessionId,
+        InterviewReportDTO report,
+        String messageId
+    ) {
+        Optional<InterviewSessionEntity> sessionOpt =
+            sessionRepository.findBySessionId(sessionId);
+        if (sessionOpt.isEmpty()) {
+            return CompletionResult.SESSION_MISSING;
+        }
+        InterviewSessionEntity session = sessionOpt.get();
+        if (messageId.equals(session.getEvaluationMessageId())
+            || sessionRepository.existsByEvaluationMessageId(messageId)) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
+
+        saveReport(sessionId, report);
+        session.setEvaluationMessageId(messageId);
+        session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+        session.setEvaluateError(null);
+        sessionRepository.save(session);
+        return CompletionResult.CREATED;
+    }
+
+    public enum CompletionResult {
+        CREATED,
+        ALREADY_COMPLETED,
+        SESSION_MISSING
+    }
+
     public Optional<InterviewSessionEntity> findBySessionId(String sessionId) {
         return sessionRepository.findBySessionId(sessionId);
     }

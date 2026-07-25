@@ -98,6 +98,9 @@ public class InterviewSessionEntity {
     @Column(length = 500)
     private String evaluateError;
 
+    @Column(name = "evaluation_message_id", unique = true, length = 36)
+    private String evaluationMessageId;
+
     // LLM提供商
     @Column(length = 50)
     private String llmProvider = "dashscope";
@@ -253,6 +256,14 @@ public class InterviewSessionEntity {
 
     public void setEvaluateError(String evaluateError) {
         this.evaluateError = evaluateError;
+    }
+
+    public String getEvaluationMessageId() {
+        return evaluationMessageId;
+    }
+
+    public void setEvaluationMessageId(String evaluationMessageId) {
+        this.evaluationMessageId = evaluationMessageId;
     }
 
     public String getLlmProvider() {
