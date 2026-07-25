@@ -8,6 +8,7 @@ import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseVectorService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -18,6 +19,10 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(
+    name = "app.knowledge-vectorization.messaging.provider",
+    havingValue = "redis-stream"
+)
 public class VectorizeStreamConsumer extends AbstractStreamConsumer<VectorizeStreamConsumer.VectorizePayload> {
 
     private final KnowledgeBaseVectorService vectorService;

@@ -5,7 +5,7 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
-import interview.guide.modules.knowledgebase.listener.VectorizeStreamProducer;
+import interview.guide.modules.knowledgebase.messaging.KnowledgeVectorizationTaskPublisher;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
@@ -33,7 +33,7 @@ public class KnowledgeBaseUploadService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final FileValidationService fileValidationService;
     private final FileHashService fileHashService;
-    private final VectorizeStreamProducer vectorizeStreamProducer;
+    private final KnowledgeVectorizationTaskPublisher vectorizationTaskPublisher;
 
     private static final long MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
     
@@ -79,7 +79,7 @@ public class KnowledgeBaseUploadService {
         KnowledgeBaseEntity savedKb = persistenceService.saveKnowledgeBase(file, name, category, fileKey, fileUrl, fileHash);
 
         // 7. 发送向量化任务到 Redis Stream（异步处理）
-        vectorizeStreamProducer.sendVectorizeTask(savedKb.getId(), content);
+        vectorizationTaskPublisher.publish(savedKb.getId());
 
         log.info("知识库上传完成，向量化任务已入队: {}, kbId={}", fileName, savedKb.getId());
 
@@ -127,8 +127,7 @@ public class KnowledgeBaseUploadService {
         log.info("开始重新向量化知识库: kbId={}, name={}", kbId, kb.getName());
 
         // 1. 下载文件并解析内容
-        String content = parseService.downloadAndParseContent(kb.getStorageKey(), kb.getOriginalFilename());
-        if (content == null || content.trim().isEmpty()) {
+        if (kb.getStorageKey() == null || kb.getStorageKey().isBlank()) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "无法从文件中提取文本内容");
         }
 
@@ -136,7 +135,7 @@ public class KnowledgeBaseUploadService {
         persistenceService.updateVectorStatusToPending(kbId);
 
         // 3. 发送向量化任务到 Stream
-        vectorizeStreamProducer.sendVectorizeTask(kbId, content);
+        vectorizationTaskPublisher.publish(kbId);
 
         log.info("重新向量化任务已发送: kbId={}", kbId);
     }
