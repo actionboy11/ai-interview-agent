@@ -20,6 +20,7 @@ public class ResumeEntity {
     private Long id;
     
     // 文件内容的SHA-256哈希值，用于去重
+    //@Column() 注解用于指定数据库字段的属性，如是否可空、是否唯一、长度等
     @Column(nullable = false, unique = true, length = 64)
     private String fileHash;
     
@@ -55,7 +56,7 @@ public class ResumeEntity {
     // 访问次数
     private Integer accessCount = 0;
 
-    // 分析状态（新上传时为 PENDING，异步分析完成后变为 COMPLETED）
+    // 分析状态（新上传时为 PENDING  待处理 ，异步分析完成后变为 COMPLETED 完成 ）
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private AsyncTaskStatus analyzeStatus = AsyncTaskStatus.PENDING;

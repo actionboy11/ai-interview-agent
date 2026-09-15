@@ -14,7 +14,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * AI Interview Platform - Main Application
  * 智能AI面试官平台 - 主启动类
  */
+// 开启定时任务
 @EnableScheduling
+// 排除不需要的OpenAI自动配置，避免不必要的依赖和启动时间提升
 @SpringBootApplication(exclude = {
     OpenAiAudioSpeechAutoConfiguration.class,
     OpenAiAudioTranscriptionAutoConfiguration.class,

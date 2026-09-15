@@ -19,6 +19,9 @@ public abstract class AbstractStreamProducer<T> {
         this.redisService = redisService;
     }
 
+    //模板方法模式的核心思想
+    //sendTask()  → 已实现（固定流程）  →  可扩展（子类实现）。
+    // streamKey() 和 buildMessage() 是"发什么"的内容（变化，子类实现）。
     protected void sendTask(T payload) {
         try {
             String messageId = redisService.streamAdd(

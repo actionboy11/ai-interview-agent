@@ -53,7 +53,10 @@ public class DocumentParseService {
         }
 
         try (InputStream inputStream = file.getInputStream()) {
+            // 使用 Apache Tika 解析文件内容
+            //parseContent 方法会根据文件类型自动选择合适的解析器，并提取文本内容
             String content = parseContent(inputStream);
+            //进行二次清理，去除多余空格、换行符、特殊字符等，以便后续处理和存储
             String cleanedContent = textCleaningService.cleanText(content);
             log.info("文件解析成功，提取文本长度: {} 字符", cleanedContent.length());
             return cleanedContent;

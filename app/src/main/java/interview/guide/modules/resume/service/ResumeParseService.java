@@ -60,6 +60,7 @@ public class ResumeParseService {
      * 检测文件的MIME类型
      */
     public String detectContentType(MultipartFile file) {
+        // 使用ContentTypeDetectionService检测文件的MIME类型，确保上传的简历文件类型合法
         return contentTypeDetectionService.detectContentType(file);
     }
 }

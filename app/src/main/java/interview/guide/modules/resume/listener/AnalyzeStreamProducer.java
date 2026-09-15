@@ -28,10 +28,13 @@ import java.util.UUID;
 public class AnalyzeStreamProducer
     extends AbstractStreamProducer<AnalyzeStreamProducer.AnalyzeTaskPayload>
     implements ResumeAnalysisTaskPublisher {
+// AnalyzeStreamProducer 继承自 AbstractStreamProducer，专门用于发送简历分析任务到 Redis Stream。
+// <AnalyzeTaskPayload> 表示任务的负载类型为 AnalyzeTaskPayload。
 
     private final ResumeRepository resumeRepository;
     private final TransactionalExecutor transactionalExecutor;
 
+    //record关键字用于定义一个不可变的数据类，自动生成构造函数、getter、equals、hashCode和toString方法
     record AnalyzeTaskPayload(Long resumeId, String content) {}
 
     public AnalyzeStreamProducer(
@@ -51,6 +54,7 @@ public class AnalyzeStreamProducer
      * @param content  简历内容
      */
     public void sendAnalyzeTask(Long resumeId, String content) {
+        // 发送任务到 Redis Stream，封装为 AnalyzeTaskPayload 对象
         sendTask(new AnalyzeTaskPayload(resumeId, content));
     }
 

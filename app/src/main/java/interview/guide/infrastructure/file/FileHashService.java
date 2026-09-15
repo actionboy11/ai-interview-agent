@@ -45,6 +45,8 @@ public class FileHashService {
      */
     public String calculateHash(byte[] data) {
         try {
+            // 使用 SHA-256 算法计算哈希值  getInstance 方法可能抛出 NoSuchAlgorithmException 异常
+            // MessageDigest 是 Java 提供的用于计算消息摘要（哈希值）的类
             MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
             byte[] hashBytes = digest.digest(data);
             return bytesToHex(hashBytes);

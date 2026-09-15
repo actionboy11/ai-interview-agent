@@ -45,11 +45,15 @@ public class ResumePersistenceService {
      */
     public Optional<ResumeEntity> findExistingResume(MultipartFile file) {
         try {
+            // 计算文件的hash值，用于快速判断是否存在重复简历
             String fileHash = fileHashService.calculateHash(file);
+            // 查询数据库中是否已有相同hash的简历
+            // spring data jpa 会自动生成查询语句
             Optional<ResumeEntity> existing = resumeRepository.findByFileHash(fileHash);
-            
+            //existing,isPresent() 这个方法会返回一个布尔值，表示Optional中是否包含值
             if (existing.isPresent()) {
                 log.info("检测到重复简历: hash={}", fileHash);
+                //existing.get() 返回Optional中包含的值，即ResumeEntity对象
                 ResumeEntity resume = existing.get();
                 resume.incrementAccessCount();
                 resumeRepository.save(resume);
@@ -204,6 +208,7 @@ public class ResumePersistenceService {
      * 获取简历的最新评测结果
      */
     public Optional<ResumeAnalysisEntity> getLatestAnalysis(Long resumeId) {
+        //Optional.ofNullable() 方法用于将可能为 null 的对象包装成 Optional 对象
         return Optional.ofNullable(analysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(resumeId));
     }
     
@@ -211,6 +216,8 @@ public class ResumePersistenceService {
      * 获取简历的最新评测结果（返回DTO）
      */
     public Optional<ResumeAnalysisResponse> getLatestAnalysisAsDTO(Long resumeId) {
+        //Optional.map() 方法用于对 Optional 中的值进行转换，如果 Optional 为空，则返回空的 Optional
+        //entityToDTO() 方法用于将 ResumeAnalysisEntity 转换为 ResumeAnalysisResponse
         return getLatestAnalysis(resumeId).map(this::entityToDTO);
     }
     

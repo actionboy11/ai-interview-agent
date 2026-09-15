@@ -5,6 +5,8 @@ import java.util.List;
 /**
  * 简历分析响应DTO
  */
+//record 是 Java 16 引入的一种特殊类，用于简化不可变数据对象的定义。
+// 它自动生成构造函数、访问器、equals、hashCode 和 toString 方法，非常适合用于数据传输对象（DTO）。
 public record ResumeAnalysisResponse(
     // 总分 (0-100)
     int overallScore,

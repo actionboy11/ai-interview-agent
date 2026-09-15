@@ -32,10 +32,13 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
+// @RequiredArgsConstructor generates a constructor with required arguments (final fields)
 @RequiredArgsConstructor
 @Tag(name = "简历管理", description = "简历上传、分析、导出与删除")
 public class ResumeController {
 
+    //用final修饰，强制 Bean 在创建时就初始化所有必需的、不可变的依赖，
+    // 从而在编译期和启动期就杜绝空指针异常，让代码更健壮、更安全、意图更清晰
     private final ResumeUploadService uploadService;
     private final ResumeDeleteService deleteService;
     private final ResumeHistoryService historyService;
@@ -47,9 +50,13 @@ public class ResumeController {
      * @return 简历分析结果，包含评分和建议
      */
     @PostMapping(value = "/api/resumes/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    //@RateLimit注解用于限制接口的访问频率，防止滥用和过载。这里设置了两个维度的限流：
+    // 1. 全局维度（GLOBAL）：限制所有用户对该接口的访问次数为5次。
+    // 2. IP维度（IP）：限制单个IP地址对该接口的访问次数为5次。
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
     public Result<Map<String, Object>> uploadAndAnalyze(@RequestParam("file") MultipartFile file) {
+
         Map<String, Object> result = uploadService.uploadAndAnalyze(file);
         boolean isDuplicate = (Boolean) result.get("duplicate");
         if (isDuplicate) {

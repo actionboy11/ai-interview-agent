@@ -38,7 +38,10 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class RedisService {
 
+    // ==================== 成员变量 ====================
+    // Redisson 客户端，用于执行 Redis 操作
     private final RedissonClient redissonClient;
+    // 用于跟踪 Stream 消息的游标，避免重复处理已处理的消息
     private final ConcurrentMap<String, StreamMessageId> streamReclaimCursors = new ConcurrentHashMap<>();
 
     // ==================== 基础键值操作 ====================
@@ -47,6 +50,8 @@ public class RedisService {
      * 设置值（无过期时间）
      */
     public <T> void set(String key, T value) {
+        // 创建一个 bucket，用于存储键值对
+        // 通过 RedissonClient 获取 RBucket 对象，RBucket 是 Redisson 提供的键值存储接口
         RBucket<T> bucket = redissonClient.getBucket(key);
         bucket.set(value);
     }

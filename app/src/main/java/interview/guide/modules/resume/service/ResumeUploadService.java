@@ -28,6 +28,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class ResumeUploadService {
 
+    // ResumeUploadService 依赖多个服务来完成简历上传和分析的流程：
     private final ResumeParseService parseService;
     private final FileStorageService storageService;
     private final ResumePersistenceService persistenceService;
@@ -48,7 +49,7 @@ public class ResumeUploadService {
     public Map<String, Object> uploadAndAnalyze(org.springframework.web.multipart.MultipartFile file) {
         long startTime = System.currentTimeMillis();
 
-        // 1. 验证文件
+        // 1. 验证文件是否存在和大小
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "简历");
 
         String fileName = file.getOriginalFilename();
@@ -57,19 +58,26 @@ public class ResumeUploadService {
             fileName, fileSize, formatFileSize(fileSize));
 
         // 2. 验证文件类型
+        //得到文件的MIME类型，确保上传的文件是允许的类型（如PDF、DOCX等）。
+        // 底层使用 Apache Tika 进行内容检测，比仅依赖文件扩展名更可靠。
         String contentType = parseService.detectContentType(file);
+        // 通过配置的允许类型列表进行验证，如果不符合要求则抛出异常
         validateContentType(contentType);
 
         // 3. 检查简历是否已存在（去重）
+        //Optional是Java 8引入的一个容器类，用于表示一个值可能存在也可能不存在。
+        // 它提供了一种优雅的方式来处理可能为null的值，避免了直接使用null导致的空指针异常。
         Optional<ResumeEntity> existingResume = persistenceService.findExistingResume(file);
         if (existingResume.isPresent()) {
             log.info("简历上传处理完成（重复）: {} - 耗时: {}ms",
                 fileName, System.currentTimeMillis() - startTime);
+            // 如果检测到重复简历，直接返回历史分析结果
             return handleDuplicateResume(existingResume.get());
         }
 
         // 4. 解析简历文本
         long parseStart = System.currentTimeMillis();
+        // 解析简历文本内容，提取纯文本（resumeText）用于后续分析 （如AI分析）
         String resumeText = parseService.parseResume(file);
         if (resumeText == null || resumeText.trim().isEmpty()) {
             throw new BusinessException(ErrorCode.RESUME_PARSE_FAILED, "无法从文件中提取文本内容，请确保文件不是扫描版PDF");
@@ -77,8 +85,11 @@ public class ResumeUploadService {
         log.info("简历文本解析完成: {} - 解析耗时: {}ms, 文本长度: {} 字符",
             fileName, System.currentTimeMillis() - parseStart, resumeText.length());
 
-        // 5. 保存简历到RustFS
+        // 5. 为什么保存简历到RustFS ？
+        // 存储简历文件到RustFS，用于后续的简历下载和知识库构建。
         long storageStart = System.currentTimeMillis();
+        // 保存简历文件到RustFS，并获取存储的文件Key和URL
+        // 这里的fileKey是RustFS中存储文件的唯一标识符，fileUrl是可以通过HTTP访问该文件的URL
         String fileKey = storageService.uploadResume(file);
         String fileUrl = storageService.getFileUrl(fileKey);
         log.info("简历已存储到RustFS: {} - 存储耗时: {}ms",
