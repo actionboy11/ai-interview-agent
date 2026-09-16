@@ -47,16 +47,23 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LlmProviderRegistry {
 
     private final LlmProviderProperties properties;
-    private final Map<String, ChatClient> clientCache = new ConcurrentHashMap<>();
-    private final Map<String, OpenAiChatModel> chatModelCache = new ConcurrentHashMap<>();
-    private final Map<String, EmbeddingModel> embeddingModelCache = new ConcurrentHashMap<>();
+    // 三级缓存整体替换：reload() 只换掉这一个引用，不再逐个 clear。
+    // 在途请求会把构建结果写入被丢弃的旧 CacheHolder，因此不会把旧配置的实例回填进新缓存。
+    // volatile 保证了多线程下的可见性，确保所有线程都能看到最新的 cache 引用。
+    private volatile CacheHolder cache = new CacheHolder();
+    // providerRepository 的功能是从数据库中获取 LLM provider 的配置，
+    // globalSettingRepository 用于获取全局设置（如默认 provider）
     private final LlmProviderRepository providerRepository;
     private final LlmGlobalSettingRepository globalSettingRepository;
+    // ApiKeyEncryptionService 用于解密存储在数据库中的加密 API Key
     private final ApiKeyEncryptionService encryptionService;
 
+    // ToolCallingManager的功能是管理工具调用的生命周期和执行逻辑，
+    // ObservationRegistry用于收集和记录观察数据，ToolCallback用于处理工具调用的回调逻辑。
     private final ToolCallingManager toolCallingManager;
     private final ObservationRegistry observationRegistry;
     private final ToolCallback interviewSkillsToolCallback;
+    // 推荐的 Embedding 模型映射，用于提示用户不要将聊天模型配置为 Embedding 模型
     private static final Map<String, String> RECOMMENDED_EMBEDDING_MODELS = Map.of(
         "dashscope", "text-embedding-v3",
         "glm", "embedding-3",
@@ -71,8 +78,11 @@ public class LlmProviderRegistry {
             LlmProviderRepository providerRepository,
             LlmGlobalSettingRepository globalSettingRepository,
             ApiKeyEncryptionService encryptionService,
+            //required = false 表示这些依赖是可选的，如果 Spring 容器中没有找到对应的 Bean，不会抛出异常，而是注入 null。
             @Autowired(required = false) ToolCallingManager toolCallingManager,
             @Autowired(required = false) ObservationRegistry observationRegistry,
+            // Qualifier("interviewSkillsToolCallback") 用于指定注入的 Bean 名称，
+            // 确保注入的是 interviewSkillsToolCallback 这个特定的 ToolCallback 实现。
             @Autowired(required = false) @Qualifier("interviewSkillsToolCallback") ToolCallback interviewSkillsToolCallback) {
         this.properties = properties;
         this.providerRepository = providerRepository;
@@ -100,7 +110,7 @@ public class LlmProviderRegistry {
      * @throws IllegalArgumentException if the providerId is unknown
      */
     public ChatClient getChatClient(String providerId) {
-        return clientCache.computeIfAbsent(providerId, id -> {
+        return cache.clients.computeIfAbsent(providerId, id -> {
             log.info("[LlmProviderRegistry] Creating new client for provider: {}", id);
             return createChatClient(id);
         });
@@ -119,10 +129,7 @@ public class LlmProviderRegistry {
      * Get a ChatClient for the specified provider, falling back to the default if null or blank.
      */
     public ChatClient getChatClientOrDefault(String providerId) {
-        if (providerId != null && !providerId.isBlank()) {
-            return getChatClient(providerId);
-        }
-        return getDefaultChatClient();
+        return getChatClient(resolveProviderId(providerId));
     }
 
     /**
@@ -131,7 +138,7 @@ public class LlmProviderRegistry {
      */
     public ChatClient getPlainChatClient(String providerId) {
         String id = resolveProviderId(providerId);
-        return clientCache.computeIfAbsent(id + ":plain", key -> createPlainChatClient(id));
+        return cache.clients.computeIfAbsent(id + ":plain", key -> createPlainChatClient(id));
     }
 
     /**
@@ -140,22 +147,26 @@ public class LlmProviderRegistry {
      */
     public ChatClient getVoiceChatClient(String providerId) {
         String id = resolveProviderId(providerId);
-        return clientCache.computeIfAbsent(id + ":voice", key -> createVoiceChatClient(id));
+        return cache.clients.computeIfAbsent(id + ":voice", key -> createVoiceChatClient(id));
     }
 
     /**
-     * 清空缓存，重新加载所有 provider。
+     * 让三级缓存整体失效，下次访问时按最新配置懒重建。
+     * <p>
+     * 语义是「缓存失效 + 懒重建」，不是重新读取配置——这里不查库、不重建客户端。
+     * 之所以整体替换 CacheHolder 而不是逐个 clear：在途线程可能已经读到旧配置、
+     * 正在构建实例，逐个 clear 会让它把旧实例回填进同一个 Map；整体替换后，
+     * 在途构建的结果只会写入被丢弃的旧 CacheHolder。
      */
     public void reload() {
-        int size = clientCache.size() + chatModelCache.size() + embeddingModelCache.size();
-        clientCache.clear();
-        chatModelCache.clear();
-        embeddingModelCache.clear();
-        log.info("[LlmProviderRegistry] Cache cleared ({} entries). Next access will re-create clients.", size);
+        CacheHolder previous = cache;
+        int size = previous.clients.size() + previous.chatModels.size() + previous.embeddingModels.size();
+        cache = new CacheHolder();
+        log.info("[LlmProviderRegistry] Cache invalidated ({} entries dropped). Next access will rebuild clients.", size);
     }
 
     public EmbeddingModel getEmbeddingModel(String providerId) {
-        return embeddingModelCache.computeIfAbsent(providerId, id -> {
+        return cache.embeddingModels.computeIfAbsent(providerId, id -> {
             log.info("[LlmProviderRegistry] Creating new embedding model for provider: {}", id);
             return createEmbeddingModel(id);
         });
@@ -165,6 +176,9 @@ public class LlmProviderRegistry {
         return getEmbeddingModel(resolveDefaultEmbeddingProviderId());
     }
 
+    /*     * Private helper methods
+
+     */
     private ChatClient createChatClient(String providerId) {
         OpenAiChatModel chatModel = getChatModel(providerId);
 
@@ -208,8 +222,16 @@ public class LlmProviderRegistry {
         return builder.build();
     }
 
+    /**
+     * 按 providerId 缓存模型连接，三种 ChatClient 配方共享同一个实例。
+     * <p>
+     * 注意：本方法会在 cache.clients.computeIfAbsent 的映射函数内被调用，形成嵌套的
+     * computeIfAbsent。ConcurrentHashMap 禁止在映射函数中修改「同一个」Map，因此
+     * clients 与 chatModels 必须始终保持为相互独立的 Map —— 一旦合并，这里会抛
+     * IllegalStateException 或在并发下死循环。
+     */
     private OpenAiChatModel getChatModel(String providerId) {
-        return chatModelCache.computeIfAbsent(providerId, id -> {
+        return cache.chatModels.computeIfAbsent(providerId, id -> {
             log.info("[LlmProviderRegistry] Creating new ChatModel for provider: {}", id);
             return buildChatModel(id);
         });
@@ -327,6 +349,7 @@ public class LlmProviderRegistry {
             ? providerId : resolveDefaultChatProviderId();
     }
 
+    //查库取默认聊天 provider ID，如果数据库不可用则使用配置文件中的默认值
     private String resolveDefaultChatProviderId() {
         if (globalSettingRepository == null) {
             return properties.getDefaultProvider();
@@ -351,6 +374,7 @@ public class LlmProviderRegistry {
                 : properties.getDefaultProvider());
     }
 
+    // loadProviderOrThrow 方法从数据库中加载指定 providerId 的配置信息，如果找不到或未启用则抛出异常。
     private ProviderSnapshot loadProviderOrThrow(String providerId) {
         if (providerRepository == null) {
             return loadProviderFromPropertiesOrThrow(providerId);
@@ -370,6 +394,7 @@ public class LlmProviderRegistry {
         );
     }
 
+    // loadProviderFromPropertiesOrThrow 方法从配置文件中加载指定 providerId 的配置信息，如果找不到则抛出异常。
     private ProviderSnapshot loadProviderFromPropertiesOrThrow(String providerId) {
         ProviderConfig config = properties.getProviders().get(providerId);
         if (config == null) {
@@ -411,6 +436,7 @@ public class LlmProviderRegistry {
             || lower.startsWith("ernie");
     }
 
+    // ProviderSnapshot 是一个不可变的记录类，用于封装 LLM provider 的配置信息。
     private record ProviderSnapshot(
         String id,
         String baseUrl,
@@ -421,5 +447,17 @@ public class LlmProviderRegistry {
         boolean supportsEmbedding,
         Double temperature
     ) {
+    }
+
+    /**
+     * 三级缓存的容器，由 reload() 整体替换。
+     * <p>
+     * 三者必须一起替换：若只换 clients 而保留 chatModels，新建的 ChatClient 会复用
+     * 旧配置构建的模型连接（旧 model 名 / 旧 baseUrl / 旧 apiKey），导致配置改动不生效。
+     */
+    private static final class CacheHolder {
+        private final Map<String, ChatClient> clients = new ConcurrentHashMap<>();
+        private final Map<String, OpenAiChatModel> chatModels = new ConcurrentHashMap<>();
+        private final Map<String, EmbeddingModel> embeddingModels = new ConcurrentHashMap<>();
     }
 }
