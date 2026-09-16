@@ -11,6 +11,12 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class JacksonConfig {
 
+    /**
+     * Create and configure an ObjectMapper bean.
+     * 创建并配置ObjectMapper bean。
+     *
+     * @return the configured ObjectMapper
+     */
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
