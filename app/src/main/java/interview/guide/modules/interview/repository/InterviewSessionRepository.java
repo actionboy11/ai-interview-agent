@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -75,4 +76,12 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      * 根据 resumeId + skillId 查找最近的面试记录（精确匹配）
      */
     List<InterviewSessionEntity> findTop10ByResumeIdAndSkillIdOrderByCreatedAtDesc(Long resumeId, String skillId);
+
+    /**
+     * 查找创建时间早于指定时刻、且处于给定状态的会话（用于超时未完成会话清理）
+     */
+    List<InterviewSessionEntity> findByStatusInAndCreatedAtBefore(
+        List<SessionStatus> statuses,
+        LocalDateTime before
+    );
 }

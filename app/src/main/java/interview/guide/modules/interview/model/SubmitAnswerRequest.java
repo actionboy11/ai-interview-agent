@@ -8,7 +8,7 @@ import jakarta.validation.constraints.NotNull;
  * 提交答案请求
  */
 public record SubmitAnswerRequest(
-    @NotBlank(message = "会话ID不能为空")
+    // 会话 ID 由请求路径提供，不由请求体校验
     String sessionId,
     
     @NotNull(message = "问题索引不能为空")

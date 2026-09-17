@@ -3,7 +3,7 @@ package interview.guide.modules.resume.service;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileStorageService;
-import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.resume.model.ResumeEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 public class ResumeDeleteService {
     
     private final ResumePersistenceService persistenceService;
-    private final InterviewPersistenceService interviewPersistenceService;
+    private final InterviewSessionService interviewSessionService;
     private final FileStorageService storageService;
     
     /**
@@ -43,8 +43,8 @@ public class ResumeDeleteService {
             log.warn("删除存储文件失败，继续删除数据库记录: {}", e.getMessage());
         }
         
-        // 2. 删除面试会话（会自动删除面试答案）
-        interviewPersistenceService.deleteSessionsByResumeId(id);
+        // 2. 删除面试会话（会自动删除面试答案），并清理 Redis 缓存与简历映射
+        interviewSessionService.deleteSessionsByResumeId(id);
         
         // 3. 删除数据库记录（包括分析记录）
         persistenceService.deleteResume(id);

@@ -4,10 +4,12 @@ import interview.guide.common.async.AbstractStreamConsumer;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
+import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
@@ -41,6 +43,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final InterviewPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final InterviewSessionCache sessionCache;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -48,7 +51,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         AnswerEvaluationService evaluationService,
         InterviewPersistenceService persistenceService,
         ObjectMapper objectMapper,
-        LlmProviderRegistry llmProviderRegistry
+        LlmProviderRegistry llmProviderRegistry,
+        InterviewSessionCache sessionCache
     ) {
         super(redisService);
         this.sessionRepository = sessionRepository;
@@ -56,6 +60,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.persistenceService = persistenceService;
         this.objectMapper = objectMapper;
         this.llmProviderRegistry = llmProviderRegistry;
+        this.sessionCache = sessionCache;
     }
 
     record EvaluatePayload(String sessionId) {}
@@ -148,6 +153,18 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected void markCompleted(EvaluatePayload payload) {
         updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.COMPLETED, null);
+        syncEvaluatedStatusToCache(payload.sessionId());
+    }
+
+    /**
+     * 评估完成后同步缓存状态。缓存是派生态，同步失败不影响主流程。
+     */
+    private void syncEvaluatedStatusToCache(String sessionId) {
+        try {
+            sessionCache.updateSessionStatus(sessionId, InterviewSessionDTO.SessionStatus.EVALUATED);
+        } catch (Exception e) {
+            log.warn("同步评估完成状态到缓存失败: sessionId={}, error={}", sessionId, e.getMessage());
+        }
     }
 
     @Override

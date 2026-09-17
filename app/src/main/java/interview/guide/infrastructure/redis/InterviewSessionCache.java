@@ -179,6 +179,15 @@ public class InterviewSessionCache {
     }
 
     /**
+     * 清理简历到会话的映射。
+     * 删除简历时使用：此时会话缓存可能已过期，不能依赖会话缓存里的 resumeId 反查。
+     */
+    public void deleteResumeSessionMapping(Long resumeId) {
+        redisService.delete(buildResumeSessionKey(resumeId));
+        log.debug("删除简历会话映射: resumeId={}", resumeId);
+    }
+
+    /**
      * 根据简历ID查找未完成的会话ID
      */
     public Optional<String> findUnfinishedSessionId(Long resumeId) {

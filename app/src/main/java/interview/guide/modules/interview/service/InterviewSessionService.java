@@ -21,10 +21,12 @@ import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -96,12 +98,16 @@ public class InterviewSessionService {
             SessionStatus.CREATED
         );
 
-        // 保存到数据库
+        // 保存到数据库。数据库是真相源，写失败必须回滚已写入的缓存并报错，
+        // 否则会留下「缓存有、数据库无」的会话，缓存过期后进度彻底丢失。
         try {
             persistenceService.saveSession(sessionId, request.resumeId(),
                 questions.size(), questions, request.llmProvider(), skillId, difficulty);
         } catch (Exception e) {
-            log.warn("保存面试会话到数据库失败: {}", e.getMessage());
+            sessionCache.deleteSession(sessionId);
+            log.error("保存面试会话到数据库失败，已回滚缓存: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_SAVE_FAILED,
+                "保存面试会话失败，请稍后重试");
         }
 
         return new InterviewSessionDTO(
@@ -388,15 +394,16 @@ public class InterviewSessionService {
             sessionCache.updateSessionStatus(request.sessionId(), SessionStatus.IN_PROGRESS);
         }
 
-        // 保存答案到数据库（不更新currentIndex）
+        // 保存答案到数据库（不更新currentIndex）。
+        // 仅在会话尚未结束（CREATED/IN_PROGRESS）时才标记为进行中，
+        // 避免把已完成或已评估的会话状态回退。
         try {
             persistenceService.saveAnswer(
                 request.sessionId(), index,
                 question.question(), question.category(),
                 request.answer(), 0, null
             );
-            persistenceService.updateSessionStatus(request.sessionId(),
-                InterviewSessionEntity.SessionStatus.IN_PROGRESS);
+            persistenceService.markInProgressIfUnfinished(request.sessionId());
         } catch (Exception e) {
             log.warn("暂存答案到数据库失败: {}", e.getMessage());
         }
@@ -508,6 +515,65 @@ public class InterviewSessionService {
         }
 
         return report;
+    }
+
+    /**
+     * 僵尸会话判定阈值：创建后超过该小时数仍未完成，视为已被放弃。
+     */
+    private static final long STALE_SESSION_HOURS = 24;
+
+    /**
+     * 清理长期未完成的僵尸会话。
+     * <p>
+     * 文字面试没有交卷动作就会一直停留在 CREATED/IN_PROGRESS，若不清理会永久累积，
+     * 并被 findUnfinishedSession 反复当成"可继续的会话"返回。
+     * 这里把超时会话置为 COMPLETED，同时把评估状态标为 FAILED 并说明原因，
+     * 再清掉 Redis 缓存与简历映射——会话数据保留，但不再占用"未完成"语义。
+     */
+    @Scheduled(fixedRate = 3_600_000L, initialDelay = 600_000L)
+    public void cleanupStaleSessions() {
+        LocalDateTime threshold = LocalDateTime.now().minusHours(STALE_SESSION_HOURS);
+        List<InterviewSessionEntity> staleSessions = persistenceService.findStaleUnfinishedSessions(threshold);
+        if (staleSessions.isEmpty()) {
+            return;
+        }
+        int cleaned = 0;
+        for (InterviewSessionEntity session : staleSessions) {
+            String sessionId = session.getSessionId();
+            try {
+                persistenceService.updateSessionStatus(sessionId,
+                    InterviewSessionEntity.SessionStatus.COMPLETED);
+                persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED,
+                    "会话超过 " + STALE_SESSION_HOURS + " 小时未完成，已自动结束");
+                sessionCache.deleteSession(sessionId);
+                cleaned++;
+            } catch (Exception e) {
+                log.warn("清理超时会话失败: sessionId={}, error={}", sessionId, e.getMessage());
+            }
+        }
+        log.info("已清理 {} 个超时未完成的面试会话（阈值 {} 小时）", cleaned, STALE_SESSION_HOURS);
+    }
+
+    /**
+     * 删除面试会话：先删数据库（真相源），成功后清理 Redis 缓存与简历映射。
+     */
+    public void deleteSession(String sessionId) {
+        persistenceService.deleteSessionBySessionId(sessionId);
+        sessionCache.deleteSession(sessionId);
+        log.info("面试会话已删除并清理缓存: sessionId={}", sessionId);
+    }
+
+    /**
+     * 删除某份简历下的全部面试会话，并清理对应缓存与简历映射。
+     */
+    public void deleteSessionsByResumeId(Long resumeId) {
+        List<String> sessionIds = persistenceService.findSessionsByResumeId(resumeId).stream()
+            .map(InterviewSessionEntity::getSessionId)
+            .toList();
+        persistenceService.deleteSessionsByResumeId(resumeId);
+        sessionIds.forEach(sessionCache::deleteSession);
+        sessionCache.deleteResumeSessionMapping(resumeId);
+        log.info("已删除简历 {} 关联的 {} 个面试会话并清理缓存", resumeId, sessionIds.size());
     }
 
     /**

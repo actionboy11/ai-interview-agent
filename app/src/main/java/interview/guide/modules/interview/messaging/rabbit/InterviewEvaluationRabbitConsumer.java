@@ -3,9 +3,11 @@ package interview.guide.modules.interview.messaging.rabbit;
 import com.rabbitmq.client.Channel;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
+import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
@@ -36,6 +38,7 @@ public class InterviewEvaluationRabbitConsumer {
   private final LlmProviderRegistry llmProviderRegistry;
   private final InterviewEvaluationRabbitProducer producer;
   private final InterviewEvaluationRetryPolicy retryPolicy;
+  private final InterviewSessionCache sessionCache;
 
   public InterviewEvaluationRabbitConsumer(
       InterviewSessionRepository sessionRepository,
@@ -44,7 +47,8 @@ public class InterviewEvaluationRabbitConsumer {
       ObjectMapper objectMapper,
       LlmProviderRegistry llmProviderRegistry,
       InterviewEvaluationRabbitProducer producer,
-      InterviewEvaluationRetryPolicy retryPolicy
+      InterviewEvaluationRetryPolicy retryPolicy,
+      InterviewSessionCache sessionCache
   ) {
     this.sessionRepository = sessionRepository;
     this.evaluationService = evaluationService;
@@ -53,6 +57,7 @@ public class InterviewEvaluationRabbitConsumer {
     this.llmProviderRegistry = llmProviderRegistry;
     this.producer = producer;
     this.retryPolicy = retryPolicy;
+    this.sessionCache = sessionCache;
   }
 
   @RabbitListener(
@@ -91,9 +96,21 @@ public class InterviewEvaluationRabbitConsumer {
           report,
           task.messageId().toString()
       );
+      syncEvaluatedStatusToCache(task.sessionId());
       channel.basicAck(deliveryTag, false);
     } catch (Exception exception) {
       routeFailure(task, deliveryTag, channel, exception);
+    }
+  }
+
+  /**
+   * 评估完成后同步缓存状态。缓存是派生态，同步失败不影响主流程。
+   */
+  private void syncEvaluatedStatusToCache(String sessionId) {
+    try {
+      sessionCache.updateSessionStatus(sessionId, InterviewSessionDTO.SessionStatus.EVALUATED);
+    } catch (Exception e) {
+      log.warn("同步评估完成状态到缓存失败: sessionId={}, error={}", sessionId, e.getMessage());
     }
   }
 

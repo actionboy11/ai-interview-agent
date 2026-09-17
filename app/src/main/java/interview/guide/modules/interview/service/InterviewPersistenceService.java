@@ -95,6 +95,21 @@ public class InterviewPersistenceService {
     }
 
     /**
+     * 仅当会话尚未结束（CREATED / IN_PROGRESS）时才标记为进行中。
+     * 用于暂存答案场景，避免把已完成或已评估的会话状态回退。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void markInProgressIfUnfinished(String sessionId) {
+        sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
+            if (session.getStatus() == InterviewSessionEntity.SessionStatus.CREATED
+                || session.getStatus() == InterviewSessionEntity.SessionStatus.IN_PROGRESS) {
+                session.setStatus(InterviewSessionEntity.SessionStatus.IN_PROGRESS);
+                sessionRepository.save(session);
+            }
+        });
+    }
+
+    /**
      * 更新评估状态
      */
     @Transactional(rollbackFor = Exception.class)
@@ -114,7 +129,9 @@ public class InterviewPersistenceService {
     }
     
     /**
-     * 更新当前问题索引
+     * 更新当前问题索引。
+     * 只改索引，不改状态：状态由调用方（persistSubmittedAnswer）显式设置，
+     * 避免此处硬编码 IN_PROGRESS 覆盖同一流程中刚写入的 COMPLETED。
      */
     @Transactional(rollbackFor = Exception.class)
     public void updateCurrentQuestionIndex(String sessionId, int index) {
@@ -122,7 +139,6 @@ public class InterviewPersistenceService {
         if (sessionOpt.isPresent()) {
             InterviewSessionEntity session = sessionOpt.get();
             session.setCurrentQuestionIndex(index);
-            session.setStatus(InterviewSessionEntity.SessionStatus.IN_PROGRESS);
             sessionRepository.save(session);
         }
     }
@@ -296,6 +312,13 @@ public class InterviewPersistenceService {
     }
     
     /**
+     * 查询简历关联的所有会话（删除前用于清理缓存）
+     */
+    public List<InterviewSessionEntity> findSessionsByResumeId(Long resumeId) {
+        return sessionRepository.findByResumeIdOrderByCreatedAtDesc(resumeId);
+    }
+
+    /**
      * 删除简历的所有面试会话
      * 由于InterviewSessionEntity设置了cascade = CascadeType.ALL, orphanRemoval = true
      * 删除会话会自动删除关联的答案
@@ -334,6 +357,16 @@ public class InterviewPersistenceService {
             InterviewSessionEntity.SessionStatus.IN_PROGRESS
         );
         return sessionRepository.findFirstByResumeIdAndStatusInOrderByCreatedAtDesc(resumeId, unfinishedStatuses);
+    }
+
+    /**
+     * 查找创建时间早于指定时刻、仍处于未完成状态的会话（用于僵尸会话清理）
+     */
+    public List<InterviewSessionEntity> findStaleUnfinishedSessions(LocalDateTime before) {
+        return sessionRepository.findByStatusInAndCreatedAtBefore(
+            List.of(InterviewSessionEntity.SessionStatus.CREATED,
+                    InterviewSessionEntity.SessionStatus.IN_PROGRESS),
+            before);
     }
     
     /**

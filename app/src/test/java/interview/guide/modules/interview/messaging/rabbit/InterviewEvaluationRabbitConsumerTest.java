@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.rabbitmq.client.Channel;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
@@ -51,7 +52,8 @@ class InterviewEvaluationRabbitConsumerTest {
         new ObjectMapper(),
         mock(LlmProviderRegistry.class),
         producer,
-        new InterviewEvaluationRetryPolicy(properties)
+        new InterviewEvaluationRetryPolicy(properties),
+        mock(InterviewSessionCache.class)
     );
   }
 
