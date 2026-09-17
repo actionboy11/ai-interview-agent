@@ -248,6 +248,11 @@ function InterviewHistoryWrapper() {
   return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} onRestartInterview={handleRestartInterview} onContinueInterview={handleContinueInterview} />;
 }
 
+/** 评估仍在进行中：此时详情页需要轮询，直到出结果 */
+function isEvaluationPending(detail: InterviewDetail): boolean {
+  return detail.evaluateStatus === 'PENDING' || detail.evaluateStatus === 'PROCESSING';
+}
+
 // 面试详情报告页面包装器
 function InterviewDetailPageWrapper() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -261,15 +266,34 @@ function InterviewDetailPageWrapper() {
       navigate('/interviews');
       return;
     }
-    historyApi.getInterviewDetail(sessionId)
-      .then(detail => {
-        setInterview(detail);
-        setLoading(false);
-      })
-      .catch(() => {
-        setError('加载面试详情失败');
-        setLoading(false);
-      });
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = () => {
+      historyApi.getInterviewDetail(sessionId)
+        .then(detail => {
+          if (cancelled) return;
+          setInterview(detail);
+          setLoading(false);
+          // 评估未出结果时继续轮询，出结果后自动停止
+          if (isEvaluationPending(detail)) {
+            timer = setTimeout(load, 3000);
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setError('加载面试详情失败');
+          setLoading(false);
+        });
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [sessionId, navigate]);
 
   if (loading) {
