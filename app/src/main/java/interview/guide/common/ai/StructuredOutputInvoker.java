@@ -1,17 +1,20 @@
 package interview.guide.common.ai;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tags;
+import interview.guide.common.ai.telemetry.AiCallObservation;
+import interview.guide.common.ai.telemetry.AiCallTelemetryRecorder;
+import interview.guide.common.ai.telemetry.AiParseOutcome;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ResponseEntity;
+import org.springframework.ai.chat.metadata.EmptyUsage;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.converter.BeanOutputConverter;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.Locale;
-import java.util.regex.Pattern;
+import java.time.Instant;
 
 /**
  * 统一封装结构化输出调用与重试策略。
@@ -26,36 +29,25 @@ public class StructuredOutputInvoker {
 3) 所有字符串内引号必须正确转义。
     """;
 
-    private static final String METRIC_INVOCATIONS = "app.ai.structured_output.invocations";
-    private static final String METRIC_ATTEMPTS = "app.ai.structured_output.attempts";
-    private static final String METRIC_LATENCY = "app.ai.structured_output.latency";
-    private static final String STATUS_SUCCESS = "success";
-    private static final String STATUS_FAILURE = "failure";
-    private static final int MAX_CONTEXT_TAG_LENGTH = 48;
-    private static final Pattern NON_ALNUM_PATTERN = Pattern.compile("[^a-z0-9_]+");
-    private static final Pattern MULTI_UNDERSCORE = Pattern.compile("_+");
-
     private final int maxAttempts;
     private final boolean includeLastErrorInRetryPrompt;
     private final boolean retryUseRepairPrompt;
     private final boolean retryAppendStrictJsonInstruction;
     private final int errorMessageMaxLength;
-    private final boolean metricsEnabled;
     private final boolean schemaValidationEnabled;
-    private final MeterRegistry meterRegistry;
+    private final AiCallTelemetryRecorder telemetryRecorder;
 
     public StructuredOutputInvoker(
         StructuredOutputProperties properties,
-        @Autowired(required = false) MeterRegistry meterRegistry
+        AiCallTelemetryRecorder telemetryRecorder
     ) {
         this.maxAttempts = Math.max(1, properties.getStructuredMaxAttempts());
         this.includeLastErrorInRetryPrompt = properties.isStructuredIncludeLastError();
         this.retryUseRepairPrompt = properties.isStructuredRetryUseRepairPrompt();
         this.retryAppendStrictJsonInstruction = properties.isStructuredRetryAppendStrictJsonInstruction();
         this.errorMessageMaxLength = Math.max(20, properties.getStructuredErrorMessageMaxLength());
-        this.metricsEnabled = properties.isStructuredMetricsEnabled();
         this.schemaValidationEnabled = properties.isStructuredSchemaValidationEnabled();
-        this.meterRegistry = meterRegistry;
+        this.telemetryRecorder = telemetryRecorder;
     }
 
     public <T> T invoke(
@@ -68,25 +60,80 @@ public class StructuredOutputInvoker {
         String logContext,
         Logger log
     ) {
+        return invoke(
+            chatClient,
+            systemPromptWithFormat,
+            userPrompt,
+            outputConverter,
+            errorCode,
+            errorPrefix,
+            logContext,
+            "unknown",
+            "unknown",
+            log
+        );
+    }
+
+    public <T> T invoke(
+        ChatClient chatClient,
+        String systemPromptWithFormat,
+        String userPrompt,
+        BeanOutputConverter<T> outputConverter,
+        ErrorCode errorCode,
+        String errorPrefix,
+        String logContext,
+        String provider,
+        String model,
+        Logger log
+    ) {
         // 统计完整调用耗时，包括结构化解析失败后的重试。
         long startNanos = System.nanoTime();
-        String contextTag = normalizeContextTag(logContext);
         String securedSystemPrompt = systemPromptWithFormat
             + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
         Exception lastError = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            long attemptStartNanos = System.nanoTime();
             String attemptSystemPrompt = attempt == 1
                 ? securedSystemPrompt
                 : buildRetrySystemPrompt(securedSystemPrompt, lastError);
             try {
-                T result = callStructuredOutput(
+                StructuredCallResult<T> result = callStructuredOutput(
                     chatClient, attemptSystemPrompt, userPrompt, outputConverter, logContext, log);
-                recordAttempt(contextTag, STATUS_SUCCESS);
-                recordInvocation(contextTag, STATUS_SUCCESS, startNanos);
-                return result;
+                telemetryRecorder.record(toObservation(
+                    logContext,
+                    provider,
+                    model,
+                    attempt,
+                    result.outcome(),
+                    attemptStartNanos,
+                    startNanos,
+                    true,
+                    result.response(),
+                    result.rawResponse(),
+                    null
+                ));
+                return result.value();
             } catch (Exception e) {
                 lastError = e;
-                recordAttempt(contextTag, STATUS_FAILURE);
+                boolean terminal = attempt == maxAttempts;
+                StructuredParseException parseException = e instanceof StructuredParseException value
+                    ? value
+                    : null;
+                telemetryRecorder.record(toObservation(
+                    logContext,
+                    provider,
+                    model,
+                    attempt,
+                    parseException == null
+                        ? AiParseOutcome.CALL_FAILURE
+                        : AiParseOutcome.PARSE_FAILURE,
+                    attemptStartNanos,
+                    startNanos,
+                    terminal,
+                    parseException == null ? null : parseException.response(),
+                    parseException == null ? null : parseException.rawResponse(),
+                    e
+                ));
                 if (attempt < maxAttempts) {
                     log.warn("{}结构化解析失败，准备重试: attempt={}/{}, error={}",
                         logContext, attempt, maxAttempts, e.getMessage());
@@ -97,14 +144,13 @@ public class StructuredOutputInvoker {
             }
         }
 
-        recordInvocation(contextTag, STATUS_FAILURE, startNanos);
         throw new BusinessException(
             errorCode,
             errorPrefix + (lastError != null ? lastError.getMessage() : "unknown")
         );
     }
 
-    private <T> T callStructuredOutput(
+    private <T> StructuredCallResult<T> callStructuredOutput(
         ChatClient chatClient,
         String systemPrompt,
         String userPrompt,
@@ -112,38 +158,103 @@ public class StructuredOutputInvoker {
         String logContext,
         Logger log
     ) {
-        var call = chatClient.prompt()
+        ChatClient.CallResponseSpec call = chatClient.prompt()
             .system(systemPrompt)
             .user(userPrompt)
             .call();
         if (schemaValidationEnabled) {
-            return call.entity(outputConverter, spec -> spec.validateSchema());
+            ResponseEntity<ChatResponse, T> result = call.responseEntity(
+                outputConverter,
+                spec -> spec.validateSchema()
+            );
+            ChatResponse response = result.response();
+            return new StructuredCallResult<>(
+                result.entity(),
+                response,
+                rawResponse(response),
+                AiParseOutcome.DIRECT_SUCCESS
+            );
         }
-        String content = call.content();
-        return convertWithRepair(content, outputConverter, logContext, log);
+        ChatResponse response = call.chatResponse();
+        String content = rawResponse(response);
+        return convertWithRepair(content, response, outputConverter, logContext, log);
     }
 
-    private <T> T convertWithRepair(
+    private <T> StructuredCallResult<T> convertWithRepair(
         String content,
+        ChatResponse response,
         BeanOutputConverter<T> outputConverter,
         String logContext,
         Logger log
     ) {
         try {
-            return outputConverter.convert(content);
+            return new StructuredCallResult<>(
+                outputConverter.convert(content),
+                response,
+                content,
+                AiParseOutcome.DIRECT_SUCCESS
+            );
         } catch (Exception firstError) {
             String repaired = repairUnescapedQuotesInJsonStrings(content);
             if (!repaired.equals(content)) {
                 try {
                     T result = outputConverter.convert(repaired);
                     log.warn("{}结构化 JSON 存在未转义引号，已在本地修复后解析成功", logContext);
-                    return result;
+                    return new StructuredCallResult<>(
+                        result,
+                        response,
+                        content,
+                        AiParseOutcome.LOCAL_REPAIR_SUCCESS
+                    );
                 } catch (Exception repairError) {
                     firstError.addSuppressed(repairError);
                 }
             }
-            throw firstError;
+            throw new StructuredParseException(content, response, firstError);
         }
+    }
+
+    private AiCallObservation toObservation(
+        String context,
+        String provider,
+        String model,
+        int attempt,
+        AiParseOutcome outcome,
+        long attemptStartNanos,
+        long invocationStartNanos,
+        boolean terminal,
+        ChatResponse response,
+        String rawResponse,
+        Exception error
+    ) {
+        Usage reportedUsage = response == null || response.getMetadata() == null
+            ? null
+            : response.getMetadata().getUsage();
+        Usage usage = reportedUsage instanceof EmptyUsage ? null : reportedUsage;
+        return new AiCallObservation(
+            context,
+            provider,
+            model,
+            attempt,
+            outcome,
+            System.nanoTime() - attemptStartNanos,
+            System.nanoTime() - invocationStartNanos,
+            terminal,
+            usage == null ? null : usage.getPromptTokens(),
+            usage == null ? null : usage.getCompletionTokens(),
+            usage == null ? null : usage.getTotalTokens(),
+            rawResponse,
+            error == null ? null : error.getClass().getSimpleName(),
+            error == null ? null : sanitizeErrorMessage(error.getMessage()),
+            Instant.now()
+        );
+    }
+
+    private String rawResponse(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return null;
+        }
+        return response.getResult().getOutput().getText();
     }
 
     private String repairUnescapedQuotesInJsonStrings(String content) {
@@ -219,6 +330,9 @@ public class StructuredOutputInvoker {
     }
 
     private String sanitizeErrorMessage(String message) {
+        if (message == null) {
+            return null;
+        }
         String oneLine = message.replace('\n', ' ').replace('\r', ' ').trim();
         if (oneLine.length() > errorMessageMaxLength) {
             return oneLine.substring(0, errorMessageMaxLength) + "...";
@@ -226,42 +340,35 @@ public class StructuredOutputInvoker {
         return oneLine;
     }
 
-    private void recordAttempt(String contextTag, String status) {
-        if (!isMetricsAvailable()) {
-            return;
-        }
-        meterRegistry.counter(
-            METRIC_ATTEMPTS,
-            Tags.of("context", contextTag, "status", status)
-        ).increment();
+    private record StructuredCallResult<T>(
+        T value,
+        ChatResponse response,
+        String rawResponse,
+        AiParseOutcome outcome
+    ) {
     }
 
-    private void recordInvocation(String contextTag, String status, long startNanos) {
-        if (!isMetricsAvailable()) {
-            return;
-        }
-        Tags tags = Tags.of("context", contextTag, "status", status);
-        meterRegistry.counter(METRIC_INVOCATIONS, tags).increment();
-        meterRegistry.timer(METRIC_LATENCY, tags)
-            .record(System.nanoTime() - startNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
-    }
+    private static final class StructuredParseException extends RuntimeException {
 
-    private boolean isMetricsAvailable() {
-        return metricsEnabled && meterRegistry != null;
-    }
+        private final String rawResponse;
+        private final ChatResponse response;
 
-    private String normalizeContextTag(String raw) {
-        String source = (raw == null || raw.isBlank()) ? "unknown" : raw;
-        String normalized = source.toLowerCase(Locale.ROOT).trim().replace(' ', '_');
-        normalized = NON_ALNUM_PATTERN.matcher(normalized).replaceAll("_");
-        normalized = MULTI_UNDERSCORE.matcher(normalized).replaceAll("_");
-        normalized = normalized.replaceAll("^_+|_+$", "");
-        if (normalized.isBlank()) {
-            normalized = "unknown";
+        private StructuredParseException(
+            String rawResponse,
+            ChatResponse response,
+            Exception cause
+        ) {
+            super(cause.getMessage(), cause);
+            this.rawResponse = rawResponse;
+            this.response = response;
         }
-        if (normalized.length() > MAX_CONTEXT_TAG_LENGTH) {
-            normalized = normalized.substring(0, MAX_CONTEXT_TAG_LENGTH);
+
+        private String rawResponse() {
+            return rawResponse;
         }
-        return normalized;
+
+        private ChatResponse response() {
+            return response;
+        }
     }
 }
