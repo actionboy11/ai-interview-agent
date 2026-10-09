@@ -51,6 +51,10 @@ spring:
         remove-existing-vector-store-table: false
 
 app:
+  agent-evaluation:
+    enabled: false
+    artifact-key: ""
+    raw-artifact-retention: 30d
   ai:
     default-provider: dashscope
     security:

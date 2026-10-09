@@ -101,6 +101,33 @@ public class FileStorageService {
         }
     }
 
+    /**
+     * 使用调用方给定的对象键上传二进制数据。
+     */
+    public String uploadBytes(byte[] bytes, String fileKey, String contentType) {
+        if (bytes == null || fileKey == null || fileKey.isBlank()) {
+            throw new BusinessException(ErrorCode.STORAGE_UPLOAD_FAILED, "上传内容或文件键为空");
+        }
+        try {
+            PutObjectRequest putRequest = PutObjectRequest.builder()
+                    .bucket(storageConfig.getBucket())
+                    .key(fileKey)
+                    .contentType(contentType)
+                    .contentLength((long) bytes.length)
+                    .build();
+            s3Client.putObject(putRequest, RequestBody.fromBytes(bytes));
+            log.info("二进制文件上传成功: key={}, size={}", fileKey, bytes.length);
+            return fileKey;
+        } catch (S3Exception e) {
+            log.error("上传二进制文件到RustFS失败: key={}, error={}", fileKey, e.getMessage(), e);
+            throw new BusinessException(
+                    ErrorCode.STORAGE_UPLOAD_FAILED,
+                    "文件存储失败: " + e.getMessage(),
+                    e
+            );
+        }
+    }
+
     private static final DateTimeFormatter DATE_PATH_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
     /**

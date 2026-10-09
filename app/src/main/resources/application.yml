@@ -101,6 +101,10 @@ spring:
 
 # Application custom configuration
 app:
+  agent-evaluation:
+    enabled: ${APP_AGENT_EVALUATION_ENABLED:false}
+    artifact-key: ${APP_AGENT_EVALUATION_ARTIFACT_KEY:}
+    raw-artifact-retention: ${APP_AGENT_EVALUATION_RAW_ARTIFACT_RETENTION:30d}
   ai:
     default-provider: dashscope
     default-embedding-provider: dashscope
