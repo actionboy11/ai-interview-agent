@@ -1,585 +1,367 @@
-## RabbitMQ 简历分析开发模式
-
-混合开发环境中，PostgreSQL、Redis、对象存储和 RabbitMQ 使用容器运行：
-
-```powershell
-docker compose -f docker-compose.dev.yml up -d
-```
-
-RabbitMQ 管理台为 `http://localhost:15672`，默认开发账号和密码均为
-`interview`。设置 `APP_RESUME_MESSAGING_PROVIDER=rabbitmq` 即启用新链路；
-改为 `redis-stream` 并重启后端即可回退。
-
-简历分析失败后依次进入 10、30、60 秒 TTL 重试队列，最终进入
-`resume.analysis.dead.queue`。可在 Swagger 使用
-`/api/admin/resume-analysis/dead-letters` 查询、查看和重放死信。
-语音面试评估同样默认使用 RabbitMQ，可通过
-`APP_VOICE_EVALUATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。它使用专属的
-`voice.evaluation.exchange`、`voice.evaluation.queue`、三个 10/30/60 秒 TTL
-重试队列，以及 `voice.evaluation.dead.queue`，不会和简历分析任务相互影响。
-
-语音评估最终失败后会写入 PostgreSQL 死信审计表。可在 Swagger 使用以下接口：
-
-- `GET /api/admin/voice-evaluation/dead-letters`
-- `GET /api/admin/voice-evaluation/dead-letters/{id}`
-- `POST /api/admin/voice-evaluation/dead-letters/{id}/replay`
-
-消息只携带任务标识，不携带音频、对话、提示词或评估内容。消费者采用手动 ACK，
-完成记录以消息 ID 保证幂等。知识库向量化和文字面试评估仍使用 Redis Stream。
-
-文字面试评估现在也默认使用 RabbitMQ，可通过
-`APP_INTERVIEW_EVALUATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。专属资源为：
-
-- `interview.evaluation.exchange`
-- `interview.evaluation.queue`
-- `interview.evaluation.queue.retry.10s`
-- `interview.evaluation.queue.retry.30s`
-- `interview.evaluation.queue.retry.60s`
-- `interview.evaluation.dead.queue`
-
-最终失败记录写入 PostgreSQL，可通过以下管理接口查询和重放：
-
-- `GET /api/admin/interview-evaluation/dead-letters`
-- `GET /api/admin/interview-evaluation/dead-letters/{id}`
-- `POST /api/admin/interview-evaluation/dead-letters/{id}/replay`
-
-文字评估消息仅携带会话和消息标识，题目、回答、简历和报告内容均从数据库
-读取。知识库向量化仍使用 Redis Stream。
-
-知识库向量化现在默认使用 RabbitMQ。消息只携带 `knowledgeBaseId`，消费端根据
-数据库中的 `storageKey` 从 RustFS 重新下载并解析原文件，避免在消息体中传输大文本。
-可通过 `APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=redis-stream` 独立回滚。
-
-- 主队列：`knowledge.vectorization.queue`
-- 重试队列：10/30/60 秒 TTL
-- 死信队列：`knowledge.vectorization.dead.queue`
-- 死信管理：`/api/admin/knowledge-vectorization/dead-letters`
-
-消费者使用手动 ACK，完成记录通过消息 ID 保证幂等；最终失败会写入 PostgreSQL，
-可通过管理接口查询和重放。
-
 <div align="center">
 
-**智能 AI 面试官平台** - 基于大语言模型的简历分析、模拟面试和 RAG 知识库系统
+# AI Interview Agent
+
+**基于 Spring AI 的智能面试、RAG 与职业能力评估平台**
+
+围绕简历理解、岗位分析、个性化出题、多轮面试、回答评估和知识问答，
+构建覆盖模型调用、工具使用、上下文管理与长任务执行的完整 AI 工作流。
 
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-green?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0-brightgreen)](https://spring.io/projects/spring-ai)
 [![React](https://img.shields.io/badge/React-18.3-blue?logo=react)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-336791?logo=postgresql)](https://www.postgresql.org/)
-
+[![RabbitMQ](https://img.shields.io/badge/RabbitMQ-4-FF6600?logo=rabbitmq)](https://www.rabbitmq.com/)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 
 </div>
 
-
 ---
 
-## 项目介绍
+## 项目概览
 
-InterviewGuide 是一个集成了简历分析、模拟面试（文字 + 语音）、面试安排、知识库管理和多模型配置的智能面试辅助平台。系统利用大语言模型（LLM）、向量数据库、Redis Stream 异步任务和实时语音技术，为求职者、HR 和培训机构提供智能化的简历评估、面试练习、知识库问答和面试日程管理能力。
+AI Interview Agent 面向求职训练场景，将用户简历、目标岗位、面试 Skill、专业参考资料与多轮会话组合为动态上下文，驱动大模型完成个性化出题、实时追问、逐题评价和综合报告生成。
+
+项目不是单一聊天页面，而是一套可运行的 AI 应用工程：后端统一管理不同模型供应商，通过 Spring AI Advisor 和 Tool Calling 扩展模型能力，通过 pgvector 构建 RAG，通过结构化输出契约连接 LLM 与业务对象，并使用 RabbitMQ 保证耗时任务可靠执行。
+
+### 核心能力
+
+| 能力 | 实现 |
+| --- | --- |
+| Agent Workflow | 简历解析 → JD 识别 → Skill 选择 → 个性化出题 → 多轮面试 → 分批评估 → 报告汇总 |
+| Tool Calling | Spring AI `ToolCallingAdvisor` + Agent Utils `SkillsTool` 动态加载面试技能 |
+| 多模型路由 | 统一管理 DashScope、Kimi、DeepSeek、GLM、LM Studio 等 OpenAI 兼容 Provider |
+| Prompt Engineering | StringTemplate 模板、动态上下文、数据边界、注入检测和任务级 Prompt 拆分 |
+| Structured Output | JSON Schema 校验、DTO 映射、本地 JSON 修复、定向重试与 Micrometer 指标 |
+| RAG | Apache Tika、Embedding、pgvector、Query Rewrite、动态 TopK/阈值和多轮上下文 |
+| 可靠异步任务 | RabbitMQ 手动 ACK、Publisher Confirm、10/30/60 秒重试、幂等、死信审计与重放 |
+| 实时语音 | WebSocket + ASR + LLM 流式输出 + 句子级并发 TTS |
+
+## Agent 工作流
+
+```mermaid
+flowchart LR
+    A["简历 / JD / 面试方向"] --> B["能力与岗位信息抽取"]
+    B --> C["Skill 选择与参考资料加载"]
+    C --> D["个性化问题与追问生成"]
+    D --> E["文字或语音多轮面试"]
+    E --> F["分批逐题评估"]
+    F --> G["二次汇总与结构化报告"]
+    G --> H["改进建议与参考答案"]
+```
+
+这是一套具备工具调用和工作流编排能力的单 Agent 系统。当前重点是可控的任务编排、上下文构建和业务可靠性，不将其包装为尚未实现的多 Agent 自主协作系统。
 
 ## 系统架构
 
-![系统架构图](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/interview-guide-architecture-diagram.png)
+```mermaid
+flowchart TB
+    UI["React / TypeScript"] --> API["Spring Boot API"]
+    UI <-->|"SSE / WebSocket"| API
 
-## 配套教程
+    API --> REG["LlmProviderRegistry"]
+    REG --> CLIENT["ChatClient 配方"]
+    CLIENT --> ADV["Advisor Chain"]
+    ADV --> TOOL["SkillsTool"]
+    ADV --> LLM["OpenAI-compatible LLM"]
 
-本项目承诺**完整功能免费开源**，也不会做所谓的 Pro 版或“付费解锁核心功能”之类的设计。
+    API --> RAG["RAG Pipeline"]
+    RAG --> TIKA["Apache Tika"]
+    RAG --> VECTOR["PostgreSQL + pgvector"]
+    RAG --> STORE["RustFS / S3"]
 
-如果你想学习这个项目，或者希望把它作为个人项目经历 / 毕设选题，我也整理了一套相对细致的教程：从基础设施搭建、核心业务实现，到最后如何在面试中讲清楚思路与亮点，尽量把容易卡住的地方讲透。
+    API --> MQ["RabbitMQ"]
+    MQ --> WORKER["Async AI Workers"]
+    WORKER --> DB["PostgreSQL"]
+    API --> REDIS["Redis / Redisson"]
+```
 
-如果你确实需要更系统的辅导，可以点这里了解详情（**教程为付费内容**，主要是想覆盖一些时间成本，望理解，感谢支持）：[《SpringAI 智能面试平台+RAG 知识库》](https://javaguide.cn/zhuanlan/interview-guide.html)。
+## Agent 工程设计
 
-## 技术栈
+### 1. 多模型接入与 ChatClient 配方
 
-### 后端技术
+`LlmProviderRegistry` 将 Provider 配置、ChatModel、EmbeddingModel 和 ChatClient 创建逻辑集中管理，使业务 Service 不依赖具体模型厂商。配置更新后通过整体替换缓存容器实现线程安全的懒重建，避免旧 API Key、模型名或 Base URL 被在途线程写回新缓存。
 
-| 技术                  | 版本  | 说明                          |
-| --------------------- | ----- | ----------------------------- |
-| Spring Boot           | 4.1.0 | 应用框架                      |
-| Java                  | 21    | 开发语言（虚拟线程）          |
-| Spring AI             | 2.0.0 | AI 集成框架、OpenAI 兼容模型接入 |
-| Spring AI Agent Utils | 0.10.0 | Skill 资源加载、Advisor 能力扩展 |
-| PostgreSQL + pgvector | 14+   | 关系数据库 + 向量存储（Compose 默认 PG16） |
-| Redis + Redisson      | 6+ / 4.0.0 | 缓存 + 消息队列（Stream） |
-| Apache Tika           | 2.9.2 | 文档解析                      |
-| iText 8               | 8.0.5 | PDF 导出                      |
-| MapStruct             | 1.6.3 | 对象映射                      |
-| SpringDoc OpenAPI     | 3.0.2 | API 接口文档                  |
-| DashScope SDK         | 2.22.7 | 语音识别/合成（Qwen3 ASR/TTS）|
-| AWS S3 SDK            | 2.29.51 | S3 兼容对象存储（MinIO/RustFS）|
-| WebSocket             | -     | 语音面试实时双向通信          |
-| Gradle                | 8.14  | 构建工具                      |
+根据任务约束创建三类 ChatClient：
 
-技术选型常见问题解答：
+| Client | Tools | Advisor | 场景 |
+| --- | --- | --- | --- |
+| Default | SkillsTool | Tool Calling、SafeGuard、可选 Memory/Logger | RAG、普通 Agent 调用 |
+| Plain | 无 | SafeGuard | 出题、评分等严格 JSON 任务 |
+| Voice | SkillsTool | 流式 Tool Calling、SafeGuard | 实时语音面试 |
 
-1. 数据存储为什么选择 PostgreSQL + pgvector？PG 的向量数据存储功能够用了，精简架构，不想引入太多组件。
-2. 为什么引入 Redis？
-   - Redis 替代 `ConcurrentHashMap` 实现面试会话的缓存。
-   - 基于 Redis Stream 实现简历分析、知识库向量化等场景的异步（还能解耦，分析和向量化可以使用其他编程语言来做）。不使用 [Kafka](https://javaguide.cn/high-performance/message-queue/kafka-questions-01.html) 这类成熟的消息队列，也是不想引入太多组件。
-3. 构建工具为什么选择 Gradle？个人更喜欢用 Gradle，也写过相关的文章：[Gradle核心概念总结](https://javaguide.cn/tools/gradle/gradle-core-concepts.html)。
+结构化任务使用 Plain Client，避免工具调用消息破坏 JSON 输出；语音场景由业务层按 `sessionId` 管理历史，因此不依赖全局 Memory Advisor，降低会话串扰风险。
 
-### 前端技术
+### 2. Skill 与 Tool Calling
 
-| 技术              | 版本  | 说明           |
-| ----------------- | ----- | -------------- |
-| React             | 18.3  | UI 框架        |
-| TypeScript        | 5.6   | 开发语言       |
-| Vite              | 5.4   | 构建工具       |
-| Tailwind CSS      | 4.1   | 样式框架       |
-| React Router      | 7.11  | 路由管理       |
-| Framer Motion     | 12.23 | 动画库         |
-| Recharts          | 3.6   | 图表库         |
-| Lucide React      | 0.468 | 图标库         |
-| React Big Calendar| 1.19  | 面试日历组件   |
-| React Virtuoso    | 4.18  | RAG 聊天虚拟列表 |
-| pnpm              | 10.26 | 前端包管理器   |
+项目内置 Java 后端、算法、系统设计、前端、Python、测试开发、AI Agent 及企业专项等面试 Skill。每个 Skill 使用 `SKILL.md`、元数据和 references 描述面试角色、考察范围、分类分配及参考知识。
 
-## 功能特性
+Spring AI Agent Utils 的 `SkillsTool` 将这些资源暴露为 ToolCallback，`ToolCallingAdvisor` 管理模型请求、工具执行和结果回传。出题阶段还会根据岗位描述、难度、历史题目和题量要求动态组装 Skill 上下文。
 
-### 简历管理模块
+### 3. Prompt 与结构化输出
 
-- **多格式解析**：支持 PDF、DOCX、DOC、TXT 等多种简历格式。
-- **异步处理流**：基于 Redis Stream 实现异步简历分析，支持实时查看处理进度（待分析/分析中/已完成/失败）。
-- **稳定性保障**：内置分析失败自动重试机制（最多 3 次）与基于内容哈希的重复检测。
-- **分析报告导出**：支持将 AI 分析结果一键导出为结构化的 PDF 简历分析报告。
+简历分析、JD 分类、面试出题、逐题评估、报告汇总、知识库查询和 Query Rewrite 使用独立 StringTemplate 模板。System Prompt 固定角色、评分标准和行为边界，User Prompt 只承载本次业务数据。
 
-### 模拟面试模块
+`StructuredOutputInvoker` 统一处理：
 
-- **Skill 驱动出题**：内置 10+ 面试方向（Java 后端、阿里/字节/腾讯专项、前端、Python、算法、系统设计、测开、AI Agent 等），每个方向由 `SKILL.md` 定义考察范围、难度分布和参考知识库。
-- **历史题目去重**：出题时自动排除已有会话中问过的题目，避免重复考察。
-- **面试阶段时长联动**：总时长滑块拖动后，各阶段（自我介绍、技术考察、项目深挖、反问环节）按时比自动分配。
-- **智能追问流**：支持配置多轮智能追问（默认 1 条），模拟多轮问答场景。
-- **统一评估架构**：文字面试和语音面试共用同一套评估引擎（分批评估 + 结构化输出 + 二次汇总 + 降级兜底），评估结果可对比。
-- **报告一键导出**：支持异步生成并导出详细的 PDF 模拟面试评估报告。
-- **面试中心入口**：面试中心页整合文字面试和语音面试入口，支持继续面试和重新面试。
+- `BeanOutputConverter` 与 JSON Schema 校验；
+- 模型输出到 Java DTO 的映射；
+- 未转义引号的有限本地修复；
+- 解析失败后的严格 JSON 定向重试；
+- 调用次数、尝试次数和耗时指标；
+- 达到最大次数后的统一业务异常。
 
-### 面试安排模块
+外部简历和 JD 通过随机数据边界标签包装，并结合 `PromptSanitizer`、安全提示和 `SafeGuardAdvisor` 降低 Prompt Injection 风险。
 
-- **邀请解析**：规则 + AI 双引擎，支持飞书/腾讯会议/Zoom 格式，自动提取公司、岗位、时间、会议链接
-- **日历管理**：日/周/月视图 + 拖拽调整 + 列表视图
-- **状态流转**：定时任务自动过期，手动标记待面试/已完成/已取消
-- **面试提醒**：可配置提醒，避免错过面试
+### 4. RAG 知识库
 
-### 语音面试模块
+```mermaid
+flowchart LR
+    A["PDF / DOCX / Markdown"] --> B["Tika 解析"]
+    B --> C["Token 分块"]
+    C --> D["Embedding"]
+    D --> E["pgvector"]
+    Q["用户问题 + 历史"] --> R["Query Rewrite"]
+    R --> S["动态 TopK / 相似度阈值"]
+    S --> E
+    E --> X["检索上下文注入"]
+    X --> Y["SSE 流式回答"]
+```
 
-实时语音对话面试，WebSocket + 千问3 语音模型（ASR/TTS/LLM 统一 API Key）：
+短问题、中等问题和长问题使用不同 TopK 与相似度阈值。查询改写失败时回退原问题；改写结果没有有效召回时继续使用原问题检索；没有有效文档命中时直接返回证据不足，而不是要求模型编造答案。
 
-- **实时流式对话**：句子级并发 TTS，边生成边合成边播放，首包延迟 200ms
-- **服务端 VAD**：自动断句，实时字幕（含中间结果）
-- **回声防护 + 手动提交**：避免 AI 语音被误录入
-- **多轮上下文记忆 + 暂停/恢复**：超时自动暂停
-- **Micrometer 埋点**：TTS/ASR 延迟、会话时长等指标
+### 5. Agent 长任务可靠性
 
-> **已知问题**：端到端延迟偏高（服务端音频中转）、无耳机时回声泄漏、TTS 音色单一、弱网音频断续。后续计划探索 WebRTC、客户端 VAD 降噪、端到端语音模型等方案。
+简历分析、文字面试评估、语音面试评估和知识库向量化默认使用独立 RabbitMQ 拓扑。消息只携带业务 ID，不传输简历正文、音频或大段文档；消费者从 PostgreSQL 或 RustFS 按需加载数据。
 
-### 知识库管理模块
+```mermaid
+flowchart LR
+    A["业务提交"] --> B["Publisher Confirm"]
+    B --> C["主队列"]
+    C --> D["消费者手动 ACK"]
+    D -->|"失败"| E["10s / 30s / 60s TTL 重试"]
+    E --> C
+    D -->|"最终失败"| F["Dead Queue"]
+    F --> G["PostgreSQL 死信审计"]
+    G --> H["管理接口人工重放"]
+```
 
-- **文档智能处理**：支持 PDF、DOCX、Markdown 等多种格式文档的自动上传、分块与异步向量化。
-- **RAG 检索增强**：集成 pgvector，通过查询改写、相似度阈值和 TopK 策略提升 AI 问答的准确性与专业度。
-- **流式响应交互**：基于 SSE（Server-Sent Events）技术实现打字机式流式响应。
-- **智能问答对话**：支持会话管理、置顶、多知识库关联、Markdown 展示和虚拟列表渲染。
-- **知识库运维**：支持分类管理、下载、重新向量化、搜索和统计信息展示。
+每类任务均支持消费幂等、失败状态持久化、死信查询和人工重放。旧 Redis Stream 实现作为条件化适配器保留，可通过配置按模块回滚，但 Redis 主要继续承担缓存和限流职责。
 
-### 多模型与系统设置模块
+## 功能模块
 
-- **多 Provider 管理**：内置 DashScope、LM Studio、Kimi、DeepSeek、GLM 等 OpenAI 兼容 Provider 配置。
-- **默认模型切换**：支持在设置页切换默认聊天模型和默认向量模型，不需要频繁修改源码配置。
-- **语音服务配置**：ASR/TTS 配置可视化管理，支持语音服务连通性测试。
-- **配置安全落盘**：运行时配置默认写入用户目录 `~/.interview-guide/`，支持 API Key 加密配置。
+- **简历智能分析**：多格式解析、多维评分、项目经历审计、改进建议和 PDF 报告。
+- **文字模拟面试**：Skill 驱动出题、简历定制题、历史去重、追问和异步评估。
+- **实时语音面试**：WebSocket、实时字幕、上下文恢复、流式 LLM 和并发 TTS。
+- **知识库问答**：多知识库会话、查询改写、向量检索、SSE 流式输出和 Markdown 展示。
+- **面试安排**：邀请信息解析、日历视图、状态流转和提醒管理。
+- **模型设置**：Provider 管理、默认 Chat/Embedding 模型切换、连通性检查和 API Key 加密。
 
-### TODO
+## 技术选型
 
-- [x] 问答助手的 Markdown 展示优化
-- [x] 知识库管理页面的知识库下载
-- [x] 异步生成模拟面试评估报告
-- [x] Docker 快速部署
-- [x] 添加 API 限流保护
-- [x] 前端性能优化（RAG 聊天 - 虚拟列表）
-- [x] 模拟面试增加追问功能
-- [x] 语音面试功能（基于 Qwen3 实时语音模型）
-- [x] 面试安排管理（智能解析 + 日历视图）
-- [x] Skill 驱动出题（10+ 面试方向 + 参考知识库）
-- [x] 统一面试评估架构（文字/语音共用评估引擎）
-- [x] 面试历史题目去重
-- [x] 面试中心页（整合文字/语音入口）
-- [x] 语音面试 LLM 流式输出 + 句子级并发 TTS
-- [x] 语音面试暂停/恢复 + 手动提交 + 回声防护
-- [x] 多 LLM Provider 管理与默认模型切换
-- [x] RAG 聊天会话管理 + 虚拟列表优化
-- [x] 可重复注解 API 限流（Global/IP/User 维度）
-- [ ] 打通模拟面试和知识库
-- [ ] 语音面试接入 WebRTC 降低延迟
-- [ ] 语音面试支持更多 TTS 音色
+### 后端与 AI
 
+| 技术 | 版本/用途 |
+| --- | --- |
+| Java / Spring Boot | Java 21、Spring Boot 4.1、虚拟线程 |
+| Spring AI | 2.0，ChatClient、Advisor、Tool Calling、Structured Output |
+| Spring AI Agent Utils | 0.10，SkillsTool |
+| PostgreSQL + pgvector | 业务数据、向量存储、HNSW/COSINE 检索 |
+| RabbitMQ | AI 长任务异步处理、延迟重试与死信 |
+| Redis + Redisson | 缓存、限流和可回滚 Stream 适配器 |
+| RustFS / S3 | 简历和知识库原始文件存储 |
+| Apache Tika | PDF、DOC、DOCX、TXT、Markdown 解析 |
+| Micrometer | 模型调用、结构化输出和语音链路指标 |
+| JUnit 5 / Mockito / AssertJ | 单元测试与消息链路验证 |
+
+### 前端
+
+| 技术 | 用途 |
+| --- | --- |
+| React 18 / TypeScript | 页面与类型安全 |
+| Vite / Tailwind CSS 4 | 构建与样式系统 |
+| React Router | 页面路由 |
+| Framer Motion | 交互动效 |
+| Recharts | 评分与统计图表 |
+| React Virtuoso | RAG 长会话虚拟列表 |
 
 ## 效果展示
 
-### 简历与面试
-
-面试中心：
+### 面试中心与出题
 
 ![面试中心](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-interview-hub.png)
 
-Skill 出题 + JD 解析：
+![Skill 出题与 JD 解析](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-skill-jd-parse.png)
 
-![Skill 出题 + JD 解析](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-skill-jd-parse.png)
-
-简历库：
-
-![简历库](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-resume-history.png)
-
-简历上传分析：
+### 简历分析与面试报告
 
 ![简历上传分析](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-resume-upload-analysis.png)
 
-简历分析详情：
-
 ![简历分析详情](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-resume-analysis-detail.png)
-
-面试记录：
-
-![面试记录](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-interview-history.png)
-
-面试详情：
-
-![面试详情](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-interview-detail.png)
-
-模拟面试：
 
 ![模拟面试](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-mock-interview.png)
 
-面试安排
+![面试详情](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-interview-detail.png)
 
-![面试安排](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-interview-schedule-list.png)
-
-多模型切换 + 语音服务设置：
-
-![管理聊天模型、向量模型和模块配置](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/llm-settings.png)
-
-
-### 知识库
-
-知识库管理：
+### RAG 知识库
 
 ![知识库管理](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-knowledge-base-management.png)
 
-问答助手：
-
 ![问答助手](https://oss.javaguide.cn/xingqiu/pratical-project/interview-guide/page-qa-assistant.png)
+
+> 当前截图沿用项目已有资源。建议后续使用个人环境重新截图，以展示 RabbitMQ 管理台、Agent 配置页和最新界面。
 
 ## 项目结构
 
-```
-interview-guide/
-├── app/                              # 后端应用
-│   ├── src/main/java/interview/guide/
-│   │   ├── App.java                  # 主启动类
-│   │   ├── common/                   # 通用基础能力
-│   │   │   ├── ai/                   # LLM Provider、结构化输出、Prompt 安全
-│   │   │   ├── annotation/           # @RateLimit 可重复限流注解
-│   │   │   ├── aspect/               # RateLimitAspect + Redis Lua 限流
-│   │   │   ├── async/                # Redis Stream 生产者/消费者模板
-│   │   │   ├── config/               # CORS、S3、OpenAPI、Jackson 等配置
-│   │   │   ├── evaluation/           # 文字/语音共用的统一评估引擎
-│   │   │   ├── exception/            # 业务异常与全局异常处理
-│   │   │   └── result/               # 统一响应 Result<T>
-│   │   ├── infrastructure/           # 基础设施
-│   │   │   ├── export/               # PDF 导出
-│   │   │   ├── file/                 # 文件解析、校验、清洗、S3 存储
-│   │   │   ├── mapper/               # MapStruct 映射器
-│   │   │   └── redis/                # RedisService、面试会话缓存
-│   │   └── modules/                  # 业务模块
-│   │       ├── interview/            # 模拟面试模块
-│   │       ├── interviewschedule/    # 面试安排模块
-│   │       ├── knowledgebase/        # 知识库模块
-│   │       ├── llmprovider/          # 多模型 Provider 与语音配置
-│   │       ├── resume/               # 简历模块
-│   │       └── voiceinterview/       # 语音面试模块
-│   └── src/main/resources/
-│       ├── application.yml           # 应用配置
-│       ├── prompts/                  # AI 提示词模板（StringTemplate）
-│       ├── scripts/                  # Redis Lua 脚本
-│       ├── skills/                   # 面试 Skill 定义和参考题库
-│       └── voice-interview-opening.yml # 语音面试开场白配置
-│
-├── frontend/                         # 前端应用
-│   ├── src/
-│   │   ├── api/                      # API 接口
-│   │   ├── components/               # 公共组件
-│   │   ├── hooks/                    # 业务 Hooks
-│   │   ├── pages/                    # 页面组件
-│   │   ├── types/                    # 类型定义
-│   │   └── utils/                    # 工具函数
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── docker-compose.yml                # 完整部署：前端 + 后端 + PostgreSQL + Redis + MinIO
-├── docker-compose.dev.yml            # 本地开发依赖：PostgreSQL + Redis + RustFS
-├── docs/                             # 架构设计与改造记录
-├── .env.example                      # 环境变量示例
-└── README.md
+```text
+InterviewGuide/
+├── app/src/main/java/interview/guide/
+│   ├── common/
+│   │   ├── ai/                 # Provider Registry、Advisor、结构化输出、安全边界
+│   │   ├── async/              # 可回滚的 Redis Stream 模板
+│   │   └── evaluation/         # 文字/语音统一评估引擎
+│   ├── infrastructure/         # Redis、文件存储、导出和对象映射
+│   └── modules/
+│       ├── resume/             # 简历解析与分析
+│       ├── interview/          # 出题、Skill、文字面试和评估
+│       ├── voiceinterview/     # 实时语音面试
+│       ├── knowledgebase/      # RAG、向量化和会话管理
+│       ├── interviewschedule/  # 面试安排
+│       └── llmprovider/        # 模型配置管理
+├── app/src/main/resources/
+│   ├── prompts/                # StringTemplate Prompt
+│   └── skills/                 # SKILL.md、元数据和 references
+├── frontend/                   # React 前端
+├── docker-compose.dev.yml      # 本地依赖环境
+└── .env.example                # 环境变量示例
 ```
 
-## 快速开始
+## 本地运行
 
-环境要求：
+推荐采用混合开发模式：PostgreSQL、Redis、RabbitMQ 和 RustFS 使用 Docker，前后端在本机运行，便于断点调试与热更新。
 
-| 依赖          | 版本 | 必需 | 说明                                     |
-| ------------- | ---- | ---- | ---------------------------------------- |
-| JDK           | 21+  | 是   | 开发语言                                 |
-| Node.js       | 18+  | 是   | 前端构建                                 |
-| pnpm          | 10+  | 推荐 | 前端包管理器（项目 packageManager 指定 10.26）|
-| Docker        | -    | 推荐 | 一键启动依赖服务（PostgreSQL/Redis/RustFS）|
+### 环境要求
 
-> 如果不用 Docker，需要自行安装 PostgreSQL 14+（含 pgvector 扩展）、Redis 6+ 和 S3 兼容存储。
+- JDK 21
+- Docker Desktop
+- Node.js 20+
+- pnpm 10+
+- IntelliJ IDEA（推荐）
 
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/Snailclimb/interview-guide.git
-cd interview-guide
-```
-
-### 2. 配置环境变量
-
-推荐复制 `.env.example` 为 `.env`，后端 `bootRun` 会自动读取根目录 `.env`。最少需要填写 `AI_BAILIAN_API_KEY`，用于 DashScope 文本模型、ASR 和 TTS：
-
-```bash
-cp .env.example .env
-
-# 编辑 .env
-# AI_BAILIAN_API_KEY=your_dashscope_api_key
-# AI_MODEL=qwen3.5-flash
-```
-
-如果你更习惯通过 shell 环境变量注入，也可以这样设置：
-
-```bash
-# macOS / Linux（zsh）
-echo 'export AI_BAILIAN_API_KEY=your_api_key' >> ~/.zshrc
-source ~/.zshrc
-
-# Linux（bash）
-echo 'export AI_BAILIAN_API_KEY=your_api_key' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 3. 启动依赖服务（可选）
-
-项目提供了 `docker-compose.dev.yml`，可一键启动 PostgreSQL、Redis、RustFS（S3 兼容存储）三个依赖：
-
-```bash
-# 启动依赖服务
-docker compose -f docker-compose.dev.yml up -d
-
-# 停止依赖服务
-docker compose -f docker-compose.dev.yml down
-
-# 停止并清除数据
-docker compose -f docker-compose.dev.yml down -v
-```
-
-启动后默认账号：
-
-| 服务         | 地址             | 账号            | 密码            |
-| ------------ | ---------------- | --------------- | --------------- |
-| PostgreSQL   | `localhost:5432` | `postgres`      | `123456`        |
-| Redis        | `localhost:6379` | -               | -               |
-| RustFS 控制台 | `localhost:9001` | `rustfsadmin`   | `rustfsadmin`   |
-
-> **注意**：应用启动时会自动检查并创建 `interview-guide` Bucket。使用 `docker-compose.dev.yml` + `:app:bootRun` 时，请确保 `.env` 中的 `APP_STORAGE_ACCESS_KEY` / `APP_STORAGE_SECRET_KEY` 与 RustFS 账号一致，例如都设为 `rustfsadmin`。如果本地已有 MinIO 或其他 S3 兼容存储，也可以直接使用，在 `.env` 中修改 `APP_STORAGE_*` 配置即可。
-
-> **IDEA Docker Debug 提示**：如果在 macOS 上使用 IntelliJ IDEA 的 Docker 调试方式启动后端，遇到 `mounts denied: The path /Applications/IntelliJ IDEA.app/Contents/lib is not shared from the host`，请在 Docker Desktop 的 `Settings -> Resources -> File Sharing` 中加入 `/Applications/IntelliJ IDEA.app/Contents/lib`（或整个 `/Applications/IntelliJ IDEA.app`）以及当前项目目录，然后重启 Docker/IDEA 后再运行。普通 `./gradlew :app:bootRun` 和 `docker compose` 启动不需要这个额外共享路径。
-
-### 4. 启动应用
-
-**后端：**
-
-```bash
-./gradlew :app:bootRun
-```
-
-后端服务启动于 `http://localhost:8080`
-
-**前端：**
-
-```bash
-cd frontend
-corepack enable
-pnpm install
-pnpm dev
-```
-
-前端服务启动于 `http://localhost:5173`
-
-
-## Docker 快速部署
-
-本项目提供了完整的 Docker 支持，可以一键启动所有服务（前后端、数据库、中间件）。
-
-Docker Compose 编排了 6 个服务：PostgreSQL（pgvector）、Redis、MinIO（S3 兼容存储）、MinIO Bucket 初始化、Spring Boot 后端、React 前端（Nginx）。数据通过 Docker 命名卷持久化，`docker-compose down` 不会丢失数据。
-
-### 1. 前置准备
-
-- 安装 [Docker](https://www.docker.com/products/docker-desktop/) 和 Docker Compose
-- 申请阿里云百炼 API Key（用于 AI 对话功能，申请地址：<https://bailian.console.aliyun.com/>）
-
-### 2. 快速启动
-
-在项目根目录下执行：
-
-`.env.example` 中的 PostgreSQL、Redis、MinIO 已与 `docker-compose.yml` 对齐（数据库用户 `postgres` / 密码 `password`，MinIO `minioadmin` / `minioadmin`）。复制为 `.env` 后主要填写 `AI_BAILIAN_API_KEY`；若你曾在旧版本中使用过不同的库密码或对象存储密钥，请同步修改 `.env`，必要时重建 Postgres 卷以免旧数据与密码不一致。
-
-```bash
-# 1. 复制环境变量配置文件
-cp .env.example .env
-
-# 2. 编辑 .env 文件，填入 AI 配置
-# vim .env
-# 必填：AI_BAILIAN_API_KEY=your_key_here
-# 必填：APP_AI_CONFIG_ENCRYPTION_KEY=your_random_long_secret
-# 可选：AI_MODEL=qwen3.5-flash   # 默认值为 qwen3.5-flash
-# 也可以在设置页维护 DashScope、Kimi、DeepSeek、GLM、LM Studio 等 Provider
-#
-# 面试参数配置（可选）：
-# APP_INTERVIEW_FOLLOW_UP_COUNT=1         # 每个主问题生成追问数量（默认 1）
-# APP_INTERVIEW_EVALUATION_BATCH_SIZE=8   # 回答评估分批大小（默认 8）
-
-# 3. 构建并启动所有服务
-docker-compose up -d --build
-```
-
-> **仅启动依赖服务**：如果只想本地开发调试（用 `./gradlew :app:bootRun` 启动后端），可以只启动基础设施：`docker compose up -d postgres redis minio createbuckets`。将 `.env.example` 复制为 `.env` 并填写 `AI_BAILIAN_API_KEY` 即可，默认账号与 `docker-compose.yml` 一致；Bucket 会由初始化任务或应用启动检查自动创建。
-
-### 3. 服务访问
-
-启动完成后，您可以通过以下地址访问各个服务：
-
-| 服务             | 地址                                           | 默认账号     | 默认密码     | 说明                   |
-| ---------------- | ---------------------------------------------- | ------------ | ------------ | ---------------------- |
-| **前端应用**     | [http://localhost](http://localhost)           | -            | -            | 用户访问入口           |
-| **后端 API**     | [http://localhost:8080](http://localhost:8080) | -            | -            | RESTful API            |
-| **接口文档**     | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) | - | - | SpringDoc/Swagger UI |
-| **MinIO 控制台** | [http://localhost:9001](http://localhost:9001) | `minioadmin` | `minioadmin` | 对象存储管理           |
-| **MinIO API**    | `localhost:9000`                               | -            | -            | S3 兼容接口            |
-| **PostgreSQL**   | `localhost:5432`                               | `postgres`   | `password`   | 数据库 (包含 pgvector) |
-| **Redis**        | `localhost:6379`                               | -            | -            | 缓存与消息队列         |
-
-### 4. 常用运维命令
-
-```bash
-# 查看服务状态
-docker-compose ps
-
-# 查看后端日志
-docker-compose logs -f app
-
-# 拉取新代码后重新构建部署
-docker-compose up -d --build
-
-# 停止并移除所有服务（数据保留在 Docker 卷中）
-docker-compose down
-
-# 停止服务并清除数据卷（慎用，会删除数据库和文件）
-docker-compose down -v
-
-# 清理无用镜像（构建产生的中间层）
-docker image prune -f
-```
-
-## 使用场景
-
-| 用户角色        | 使用场景                               |
-| --------------- | -------------------------------------- |
-| **求职者**      | 上传简历获取分析建议，进行模拟面试练习 |
-| **HR/招聘人员** | 批量分析简历，评估候选人能力           |
-| **培训机构**    | 提供面试培训服务，管理知识库资源       |
-
-## 常见问题
-
-### Q: 数据库表创建失败/数据丢失
-
-检查 JPA 的 `ddl-auto` 配置。`ddl-auto` 模式对比：
-
-| 模式     | 行为                            | 适用场景      | 数据保留 |
-| -------- | ------------------------------- | ------------- | -------- |
-| **update** | 智能模式：表不存在自动创建，存在则增量更新 | **开发环境（推荐）** | ✅ 保留 |
-| create   | 无条件删除并重建所有表          | 仅首次建表时使用 | ❌ 删除 |
-| validate | 只验证，不修改                  | 生产环境      | ✅ 保留 |
-| none     | 什么都不做                      | 生产环境      | ✅ 保留 |
-
-**推荐配置（已默认）**：
-
-```yaml
-jpa:
-  hibernate:
-    ddl-auto: update  # 首次启动自动创建表，后续保留数据并增量更新
-```
-
-⚠️ **注意**：避免使用 `create` 模式，否则每次重启都会删除所有数据！
-
-### Q: 知识库向量化失败
-
-当 `initialize-schema: false` 时，Spring AI **不会自动创建** `vector_store` 表。
-
-```java
-spring:
-  ai:
-    vectorstore:
-      pgvector:
-        initialize-schema: true 
-
-```
-
-建议开发环境设置为 true，方便快速启动。生产环境设置为 false，手动管理数据库 schema，避免意外变更。
-
-### Q: 简历分析失败
-
-检查一下阿里云 DashScope API KEY 是否配置正确（申请地址：<https://bailian.console.aliyun.com/>）。
-
-### Q: 设置页新增/切换模型后不生效？
-
-运行时 Provider 配置默认写到 `~/.interview-guide/llm-providers.yml` 和 `~/.interview-guide/llm-providers.env`。可以在设置页点击测试连接，或调用 `/api/llm-provider/reload` 重新加载配置。Docker 部署时如果希望配置持久化，建议为该目录挂载卷。
-
-### Q: 语音面试无法识别或没有声音？
-
-语音面试的 ASR/TTS 默认也使用 `AI_BAILIAN_API_KEY`。请检查浏览器麦克风权限、后端日志中的 DashScope WebSocket 连接状态，以及设置页里的 ASR/TTS 测试结果。无耳机时可能触发回声录入，建议先使用手动提交模式或佩戴耳机测试。
-
-### Q: 简历分析一直显示"分析中"？
-
-检查 Redis 连接和 Stream Consumer 是否正常运行。查看后端日志确认是否有错误。
-
-### Q: PDF 导出失败或中文显示异常？
-
-项目已内置中文字体（珠圆玉润仿宋），支持跨平台导出。如遇到问题，请检查：
-- 字体文件是否存在：`app/src/main/resources/fonts/ZhuqueFangsong-Regular.ttf`
-- 检查日志中的字体加载信息
-- 确认 iText 依赖是否正确
-
-### Q: Windows PowerShell 下后端日志中文乱码？
-
-**原因简述**：后端与 Logback 按 **UTF-8** 输出日志；中文 Windows 下控制台默认多为 **GBK（代码页 936）**，且 PowerShell 的 `$OutputEncoding`、控制台编码若未统一为 UTF-8，显示时就会把同一串字节解释错，出现乱码。
-
-**本项目已做的配置**（一般无需再改）：根目录 `gradle.properties`（Gradle 进程 UTF-8）、`app/src/main/resources/logback-spring.xml`（控制台日志 UTF-8）、`app/build.gradle` 中 `bootRun` 的 JVM 参数（含 `file.encoding` / `stdout.encoding` / `stderr.encoding`）。
-
-**仍乱码时（PowerShell 侧）**：在启动 `.\gradlew.bat :app:bootRun` 的同一终端先执行下面一段；或写入 **PowerShell 配置文件**（`$PROFILE`）以便每次自动生效：
+### 1. 克隆与配置
 
 ```powershell
-chcp 65001 | Out-Null
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false)
-$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+git clone https://github.com/actionboy11/ai-interview-agent.git
+cd ai-interview-agent
+Copy-Item .env.example .env
 ```
 
-新建或编辑配置文件：`if (!(Test-Path $PROFILE)) { New-Item -Path $PROFILE -ItemType File -Force }`，再 `notepad $PROFILE` 将上述内容粘贴保存；新开终端后生效，或执行 `. $PROFILE` 立即加载。若提示脚本无法执行，可执行一次：`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`。
+至少填写：
 
-在 PowerShell 中建议使用 `.\gradlew.bat :app:bootRun`（或仓库根目录的 `.\gradlew.bat`），避免与执行策略、路径解析相关的问题。
+```env
+AI_BAILIAN_API_KEY=your_dashscope_api_key
+APP_AI_CONFIG_ENCRYPTION_KEY=replace_with_a_random_long_secret
 
-## 贡献
+POSTGRES_PASSWORD=123456
+APP_STORAGE_ACCESS_KEY=rustfsadmin
+APP_STORAGE_SECRET_KEY=rustfsadmin
+```
 
-欢迎提交 Issue 和 Pull Request！
+`.env` 已被 Git 忽略。Gradle `bootRun` 会从仓库根目录加载该文件，不要将真实 API Key 写入 `application.yml` 或提交到版本库。
 
-## 许可证
+### 2. 启动基础设施
 
-AGPL-3.0 License（只要通过网络提供服务，就必须向用户公开修改后的源码）
+```powershell
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml ps
+```
+
+| 服务 | 地址 | 默认账号 |
+| --- | --- | --- |
+| PostgreSQL | `localhost:5432` | `postgres / 123456` |
+| Redis | `localhost:6379` | 无 |
+| RabbitMQ | `localhost:5672` | `interview / interview` |
+| RabbitMQ 管理台 | http://localhost:15672 | `interview / interview` |
+| RustFS API | `localhost:9000` | `rustfsadmin / rustfsadmin` |
+| RustFS 控制台 | http://localhost:9001 | `rustfsadmin / rustfsadmin` |
+
+RustFS 首次启动后创建名为 `interview-guide` 的 Bucket；应用也配置了自动创建能力。
+
+### 3. 启动后端
+
+```powershell
+.\gradlew.bat :app:bootRun
+```
+
+- API：http://localhost:8080
+- Swagger：http://localhost:8080/swagger-ui.html
+- Health：http://localhost:8080/actuator/health
+
+也可以在 IDEA 中直接运行 `app/src/main/java/interview/guide/App.java`。使用 IDEA 启动时，需要在 Run Configuration 中加载 `.env` 对应变量。
+
+### 4. 启动前端
+
+```powershell
+cd frontend
+pnpm install
+pnpm run dev
+```
+
+访问：http://localhost:5173
+
+### 5. 验证构建
+
+```powershell
+.\gradlew.bat :app:test --no-daemon
+cd frontend
+pnpm run build
+```
+
+停止依赖但保留数据：
+
+```powershell
+docker compose -f docker-compose.dev.yml stop
+```
+
+> 谨慎使用 `docker compose -f docker-compose.dev.yml down -v`，该命令会删除数据库、消息和对象存储卷。
+
+## RabbitMQ 任务拓扑
+
+四类任务分别使用独立 Exchange、Queue、Routing Key、重试队列和死信队列：
+
+| 任务 | 主队列 | 死信管理接口 |
+| --- | --- | --- |
+| 简历分析 | `resume.analysis.queue` | `/api/admin/resume-analysis/dead-letters` |
+| 语音评估 | `voice.evaluation.queue` | `/api/admin/voice-evaluation/dead-letters` |
+| 文字评估 | `interview.evaluation.queue` | `/api/admin/interview-evaluation/dead-letters` |
+| 知识库向量化 | `knowledge.vectorization.queue` | `/api/admin/knowledge-vectorization/dead-letters` |
+
+对应环境变量默认均为 `rabbitmq`：
+
+```env
+APP_RESUME_MESSAGING_PROVIDER=rabbitmq
+APP_VOICE_EVALUATION_MESSAGING_PROVIDER=rabbitmq
+APP_INTERVIEW_EVALUATION_MESSAGING_PROVIDER=rabbitmq
+APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=rabbitmq
+```
+
+将单个值改为 `redis-stream` 并重启后端，可对该模块独立回滚。
+
+## 已知限制与 Roadmap
+
+- 增加 Agent 轨迹记录与离线评测集，形成可重复的 Prompt/模型效果评估。
+- 将面试 Agent 的阶段流转升级为显式状态机，增强可解释性和恢复能力。
+- 打通知识库与模拟面试，让出题和参考答案可以按知识库动态增强。
+- 探索 WebRTC、客户端 VAD 和端到端语音模型，降低语音链路延迟。
+- 优化前端大 chunk 与部分 Tailwind 生成的 CSS 警告。
+
+## 项目来源与开源说明
+
+本项目基于 [Snailclimb/interview-guide](https://github.com/Snailclimb/interview-guide) 进行二次开发，并于 2026 年围绕 Spring AI Agent、Advisor、Tool Calling、RAG、多模型路由、结构化输出和 RabbitMQ 异步可靠性进行了扩展与重构。
+
+感谢原项目作者及所有开源依赖的贡献。本项目继续按照 [GNU Affero General Public License v3.0](LICENSE) 发布；如通过网络向用户提供修改后的服务，请按照许可证要求提供对应源代码。
+
+## License
+
+[GNU Affero General Public License v3.0](LICENSE)
