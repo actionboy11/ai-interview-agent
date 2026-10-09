@@ -214,6 +214,7 @@ public class KnowledgeBaseQueryService {
 
             // 2. Query rewrite + 动态参数检索
             List<Message> effectiveHistory = sanitizeHistory(history);
+            // 同时保留改写查询与原始查询，改写未命中时可回退检索。
             QueryContext queryContext = buildQueryContext(question, effectiveHistory);
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 

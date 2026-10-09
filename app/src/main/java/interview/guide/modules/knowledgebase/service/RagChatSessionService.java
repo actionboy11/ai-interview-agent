@@ -166,6 +166,7 @@ public class RagChatSessionService {
         RagChatSessionEntity session = sessionRepository.findByIdWithKnowledgeBases(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 
+        // 将检索范围限定为当前会话已关联的知识库；访问权限应由独立鉴权逻辑保证。
         List<Long> kbIds = session.getKnowledgeBaseIds();
         List<Message> history = queryProperties.getHistory().isEnabled()
             ? loadHistoryMessages(sessionId) : List.of();

@@ -68,6 +68,7 @@ public class StructuredOutputInvoker {
         String logContext,
         Logger log
     ) {
+        // 统计完整调用耗时，包括结构化解析失败后的重试。
         long startNanos = System.nanoTime();
         String contextTag = normalizeContextTag(logContext);
         String securedSystemPrompt = systemPromptWithFormat
