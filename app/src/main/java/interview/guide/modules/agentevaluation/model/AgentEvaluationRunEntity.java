@@ -99,4 +99,10 @@ public class AgentEvaluationRunEntity {
     entity.updatedAt = now;
     return entity;
   }
+
+  public void pause(String reason, Instant now) {
+    this.status = AgentEvaluationRunStatus.PAUSED;
+    this.pauseReason = reason;
+    this.updatedAt = now;
+  }
 }

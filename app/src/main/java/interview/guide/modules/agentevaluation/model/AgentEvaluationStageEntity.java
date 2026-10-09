@@ -139,4 +139,67 @@ public class AgentEvaluationStageEntity {
     entity.updatedAt = now;
     return entity;
   }
+
+  public void succeed(
+      String artifactKey,
+      long durationMs,
+      Integer promptTokens,
+      Integer completionTokens,
+      Integer totalTokens,
+      Instant completedAt
+  ) {
+    requireRunning();
+    this.status = AgentEvaluationStageStatus.SUCCEEDED;
+    this.artifactKey = artifactKey;
+    this.durationMs = durationMs;
+    this.promptTokens = promptTokens;
+    this.completionTokens = completionTokens;
+    this.totalTokens = totalTokens;
+    this.errorType = null;
+    this.errorSummary = null;
+    this.nextRetryAt = null;
+    this.completedAt = completedAt;
+    this.updatedAt = completedAt;
+  }
+
+  public void waitForRetry(
+      AgentEvaluationErrorType errorType,
+      String errorSummary,
+      Instant nextRetryAt,
+      Instant now
+  ) {
+    requireRunning();
+    this.status = AgentEvaluationStageStatus.RETRY_WAITING;
+    this.errorType = errorType;
+    this.errorSummary = errorSummary;
+    this.nextRetryAt = nextRetryAt;
+    this.updatedAt = now;
+  }
+
+  public void pauseForCredential(String errorSummary, Instant now) {
+    requireRunning();
+    this.status = AgentEvaluationStageStatus.PAUSED;
+    this.errorType = AgentEvaluationErrorType.INVALID_CREDENTIAL;
+    this.errorSummary = errorSummary;
+    this.updatedAt = now;
+  }
+
+  public void fail(
+      AgentEvaluationErrorType errorType,
+      String errorSummary,
+      Instant now
+  ) {
+    requireRunning();
+    this.status = AgentEvaluationStageStatus.FAILED;
+    this.errorType = errorType;
+    this.errorSummary = errorSummary;
+    this.completedAt = now;
+    this.updatedAt = now;
+  }
+
+  private void requireRunning() {
+    if (status != AgentEvaluationStageStatus.RUNNING) {
+      throw new IllegalStateException("Stage must be RUNNING but was " + status);
+    }
+  }
 }

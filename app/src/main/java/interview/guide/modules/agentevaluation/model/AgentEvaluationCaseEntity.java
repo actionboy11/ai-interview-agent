@@ -91,4 +91,19 @@ public class AgentEvaluationCaseEntity {
     entity.updatedAt = now;
     return entity;
   }
+
+  public void startStage(AgentEvaluationStageType stage, Instant now) {
+    this.status = AgentEvaluationCaseStatus.RUNNING;
+    this.currentStage = stage;
+    if (this.startedAt == null) {
+      this.startedAt = now;
+    }
+    this.updatedAt = now;
+  }
+
+  public void pause(String errorSummary, Instant now) {
+    this.status = AgentEvaluationCaseStatus.PAUSED;
+    this.errorSummary = errorSummary;
+    this.updatedAt = now;
+  }
 }
