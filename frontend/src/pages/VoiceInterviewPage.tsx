@@ -7,6 +7,7 @@ import InterviewPageHeader from '../components/InterviewPageHeader';
 import RealtimeSubtitle from '../components/RealtimeSubtitle';
 import { skillApi, type SkillDTO } from '../api/skill';
 import { getTemplateName } from '../utils/voiceInterview';
+import { resolveVoiceWebSocketUrl } from '../utils/webSocketUrl';
 import {
   voiceInterviewApi,
   connectWebSocket,
@@ -543,7 +544,7 @@ export default function VoiceInterviewPage() {
       setSessionId(session.sessionId);
       setCurrentPhase(session.currentPhase);
 
-      const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
+      const wsUrl = resolveVoiceWebSocketUrl(session.sessionId, session.webSocketUrl);
       connectWithHandlers(session.sessionId, wsUrl);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '创建面试会话失败，请重试';
@@ -604,7 +605,7 @@ export default function VoiceInterviewPage() {
       }
       setMessages(restored);
 
-      const wsUrl = session.webSocketUrl || `ws://localhost:8080/ws/voice-interview/${session.sessionId}`;
+      const wsUrl = resolveVoiceWebSocketUrl(session.sessionId, session.webSocketUrl);
       connectWithHandlers(session.sessionId, wsUrl);
     } catch (error) {
       setError(error instanceof Error ? error.message : '恢复会话失败');
