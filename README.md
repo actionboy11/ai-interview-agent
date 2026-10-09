@@ -38,6 +38,15 @@ AI Interview Agent 面向求职训练场景，将用户简历、目标岗位、�
 | 可靠异步任务 | RabbitMQ 手动 ACK、Publisher Confirm、10/30/60 秒重试、幂等、死信审计与重放 |
 | 实时语音 | WebSocket + ASR + LLM 流式输出 + 句子级并发 TTS |
 
+### 本仓库的二次开发贡献
+
+Agent、Advisor、Tool Calling、RAG、多模型路由、结构化输出和语音面试属于原项目已有的平台能力。本仓库当前的主要二次开发工作集中在异步可靠性与上线工程：
+
+- 将简历分析、文字面试评估、语音面试评估和知识库向量化从 Redis Stream 默认链路迁移到四套独立 RabbitMQ 拓扑。
+- 增加手动 ACK、Publisher Confirm、10/30/60 秒延迟重试、消费幂等、最终死信持久化与管理端重放。
+- 保留逐模块 `redis-stream` 回滚开关，支持迁移期间的灰度切换与故障回退。
+- 增加面向受邀演示的 Docker Compose、HTTPS、访问认证、资源限制、备份和公网部署能力。
+
 ## Agent 工作流
 
 ```mermaid
@@ -358,7 +367,7 @@ APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=rabbitmq
 
 ## 项目来源与开源说明
 
-本项目基于 [Snailclimb/interview-guide](https://github.com/Snailclimb/interview-guide) 进行二次开发，并于 2026 年围绕 Spring AI Agent、Advisor、Tool Calling、RAG、多模型路由、结构化输出和 RabbitMQ 异步可靠性进行了扩展与重构。
+本项目基于 [Snailclimb/interview-guide](https://github.com/Snailclimb/interview-guide) 进行二次开发。原项目提供 AI 面试、Agent/Advisor、RAG、多模型与语音能力；本仓库在此基础上完成 RabbitMQ 异步可靠性迁移和生产演示环境建设。
 
 感谢原项目作者及所有开源依赖的贡献。本项目继续按照 [GNU Affero General Public License v3.0](LICENSE) 发布；如通过网络向用户提供修改后的服务，请按照许可证要求提供对应源代码。
 

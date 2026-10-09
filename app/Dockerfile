@@ -44,6 +44,10 @@ RUN gradle :app:bootJar --no-daemon -x test
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # 从第一阶段 (builder) 中复制生成的 JAR 文件到当前镜像
 # 只复制构建产物，不复制源代码和 Gradle 缓存，保持镜像干净
 COPY --from=builder /workspace/app/build/libs/*.jar app.jar

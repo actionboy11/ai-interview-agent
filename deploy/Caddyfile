@@ -1,0 +1,16 @@
+{$SITE_ADDRESS} {
+    encode zstd gzip
+
+    basic_auth {
+        {$DEMO_USERNAME} {$DEMO_PASSWORD_HASH}
+    }
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    reverse_proxy frontend:80
+}
