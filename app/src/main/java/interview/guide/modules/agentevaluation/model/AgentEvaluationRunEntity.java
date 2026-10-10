@@ -105,4 +105,16 @@ public class AgentEvaluationRunEntity {
     this.pauseReason = reason;
     this.updatedAt = now;
   }
+
+  public void resume(Instant now) {
+    if (status != AgentEvaluationRunStatus.PAUSED) {
+      throw new IllegalStateException("Run must be PAUSED but was " + status);
+    }
+    this.status = AgentEvaluationRunStatus.RUNNING;
+    this.pauseReason = null;
+    if (this.startedAt == null) {
+      this.startedAt = now;
+    }
+    this.updatedAt = now;
+  }
 }

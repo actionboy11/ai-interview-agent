@@ -3,8 +3,10 @@ package interview.guide.modules.agentevaluation.service;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationCaseEntity;
+import interview.guide.modules.agentevaluation.model.AgentEvaluationCaseStatus;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationErrorType;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationRunEntity;
+import interview.guide.modules.agentevaluation.model.AgentEvaluationRunStatus;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationStageEntity;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationStageStatus;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationStageType;
@@ -126,6 +128,30 @@ public class AgentEvaluationCheckpointService {
     stage.pauseForCredential(errorSummary, now);
     testCase.pause(errorSummary, now);
     run.pause(errorSummary, now);
+  }
+
+  @Transactional
+  public void resumeAfterCredentialRefresh(String runId, Instant now) {
+    AgentEvaluationRunEntity run = findRun(runId);
+    if (run.getStatus() != AgentEvaluationRunStatus.PAUSED) {
+      throw new BusinessException(
+          ErrorCode.BAD_REQUEST,
+          "只有已暂停的评测批次才能在凭证更新后恢复"
+      );
+    }
+    stageRepository.findByRunIdAndStatus(runId, AgentEvaluationStageStatus.PAUSED)
+        .forEach(stage -> stage.resumeAfterCredentialRefresh(now));
+    caseRepository.findByRunIdAndStatus(runId, AgentEvaluationCaseStatus.PAUSED)
+        .forEach(testCase -> testCase.resume(now));
+    run.resume(now);
+  }
+
+  @Transactional
+  public int recoverOrphanedStages(Instant staleBefore, Instant now) {
+    if (!staleBefore.isBefore(now)) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "孤儿阶段截止时间必须早于恢复时间");
+    }
+    return stageRepository.recoverOrphanedRunningStages(staleBefore, now);
   }
 
   @Transactional

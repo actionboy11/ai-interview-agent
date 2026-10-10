@@ -184,6 +184,20 @@ public class AgentEvaluationStageEntity {
     this.updatedAt = now;
   }
 
+  public void resumeAfterCredentialRefresh(Instant now) {
+    if (status != AgentEvaluationStageStatus.PAUSED
+        || errorType != AgentEvaluationErrorType.INVALID_CREDENTIAL) {
+      throw new IllegalStateException(
+          "Stage must be PAUSED for INVALID_CREDENTIAL but was " + status + "/" + errorType
+      );
+    }
+    this.status = AgentEvaluationStageStatus.RETRY_WAITING;
+    this.errorType = null;
+    this.errorSummary = null;
+    this.nextRetryAt = now;
+    this.updatedAt = now;
+  }
+
   public void fail(
       AgentEvaluationErrorType errorType,
       String errorSummary,

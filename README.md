@@ -327,6 +327,22 @@ cd frontend
 pnpm run build
 ```
 
+### Agent 评测安全门
+
+Agent 评测基础能力默认关闭。任何真实离线评测开始前，必须同时满足以下条件：
+
+1. `APP_AGENT_EVALUATION_ENABLED=true`；
+2. `APP_AGENT_EVALUATION_ARTIFACT_KEY` 已配置为独立的、Base64 编码的 32 字节随机密钥，且密钥已妥善备份；
+3. 恢复集成测试通过：
+
+```powershell
+.\gradlew.bat :app:test --tests "*AgentEvaluationRecoveryIntegrationTest" --no-daemon
+```
+
+评测检查点持久化成功阶段及其产物引用。进程重启后会复用成功阶段，从首个未完成阶段继续；API Key 失效会暂停阶段、样本和批次，不会清空已经完成的结果。更新凭证后才能显式恢复。超时停留在 `RUNNING` 的阶段会以数据库条件更新回收到 `RETRY_WAITING`，避免多实例重复回收。
+
+模型原始响应不会以明文写入数据库，而是使用独立密钥进行 AES-256-GCM 加密后保存到对象存储。密钥错误、AAD 不匹配或密文被篡改时读取会直接失败，不返回部分明文。不要复用 Provider API Key 加密密钥；评测产物密钥丢失后，已有加密产物无法恢复。
+
 停止依赖但保留数据：
 
 ```powershell
@@ -359,7 +375,7 @@ APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=rabbitmq
 
 ## 已知限制与 Roadmap
 
-- 增加 Agent 轨迹记录与离线评测集，形成可重复的 Prompt/模型效果评估。
+- 在现有调用审计、检查点和加密产物基础上增加离线数据集与基准执行器，输出结构化成功率、重试恢复率、调用次数、Token 和阶段耗时。
 - 将面试 Agent 的阶段流转升级为显式状态机，增强可解释性和恢复能力。
 - 打通知识库与模拟面试，让出题和参考答案可以按知识库动态增强。
 - 探索 WebRTC、客户端 VAD 和端到端语音模型，降低语音链路延迟。

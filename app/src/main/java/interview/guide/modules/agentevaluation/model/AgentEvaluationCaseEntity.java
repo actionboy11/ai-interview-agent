@@ -106,4 +106,13 @@ public class AgentEvaluationCaseEntity {
     this.errorSummary = errorSummary;
     this.updatedAt = now;
   }
+
+  public void resume(Instant now) {
+    if (status != AgentEvaluationCaseStatus.PAUSED) {
+      throw new IllegalStateException("Case must be PAUSED but was " + status);
+    }
+    this.status = AgentEvaluationCaseStatus.PENDING;
+    this.errorSummary = null;
+    this.updatedAt = now;
+  }
 }
