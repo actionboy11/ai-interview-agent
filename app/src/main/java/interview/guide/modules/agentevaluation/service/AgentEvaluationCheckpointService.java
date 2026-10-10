@@ -151,7 +151,13 @@ public class AgentEvaluationCheckpointService {
     if (!staleBefore.isBefore(now)) {
       throw new BusinessException(ErrorCode.BAD_REQUEST, "孤儿阶段截止时间必须早于恢复时间");
     }
-    return stageRepository.recoverOrphanedRunningStages(staleBefore, now);
+    return stageRepository.recoverOrphanedRunningStages(
+        staleBefore,
+        now,
+        AgentEvaluationStageStatus.RUNNING,
+        AgentEvaluationStageStatus.RETRY_WAITING,
+        AgentEvaluationErrorType.INFRASTRUCTURE_ERROR
+    );
   }
 
   @Transactional

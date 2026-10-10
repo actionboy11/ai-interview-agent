@@ -1,5 +1,6 @@
 package interview.guide.modules.agentevaluation.repository;
 
+import interview.guide.modules.agentevaluation.model.AgentEvaluationErrorType;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationStageEntity;
 import interview.guide.modules.agentevaluation.model.AgentEvaluationStageStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -7,7 +8,6 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -25,7 +25,6 @@ public interface AgentEvaluationStageRepository extends JpaRepository<AgentEvalu
   );
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
-  @Transactional
   @Query("""
       update AgentEvaluationStageEntity stage
          set stage.status = interview.guide.modules.agentevaluation.model.AgentEvaluationStageStatus.RUNNING,
@@ -43,20 +42,22 @@ public interface AgentEvaluationStageRepository extends JpaRepository<AgentEvalu
   );
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
-  @Transactional
   @Query("""
       update AgentEvaluationStageEntity stage
-         set stage.status = interview.guide.modules.agentevaluation.model.AgentEvaluationStageStatus.RETRY_WAITING,
-             stage.errorType = interview.guide.modules.agentevaluation.model.AgentEvaluationErrorType.INFRASTRUCTURE_ERROR,
+         set stage.status = :recoveredStatus,
+             stage.errorType = :errorType,
              stage.errorSummary = 'RUNNING 阶段超时，已回收等待重试',
              stage.nextRetryAt = :recoveredAt,
              stage.updatedAt = :recoveredAt,
              stage.version = stage.version + 1
-       where stage.status = interview.guide.modules.agentevaluation.model.AgentEvaluationStageStatus.RUNNING
+       where stage.status = :runningStatus
          and stage.updatedAt < :staleBefore
       """)
   int recoverOrphanedRunningStages(
       @Param("staleBefore") Instant staleBefore,
-      @Param("recoveredAt") Instant recoveredAt
+      @Param("recoveredAt") Instant recoveredAt,
+      @Param("runningStatus") AgentEvaluationStageStatus runningStatus,
+      @Param("recoveredStatus") AgentEvaluationStageStatus recoveredStatus,
+      @Param("errorType") AgentEvaluationErrorType errorType
   );
 }

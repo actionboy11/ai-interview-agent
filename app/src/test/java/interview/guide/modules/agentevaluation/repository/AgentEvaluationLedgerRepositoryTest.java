@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.Set;
@@ -63,6 +64,9 @@ class AgentEvaluationLedgerRepositoryTest {
 
   @Autowired
   private AiCallAuditRepository auditRepository;
+
+  @Autowired
+  private TransactionTemplate transactionTemplate;
 
   @Test
   @DisplayName("批次、样本、阶段和调用审计使用字符串枚举并保留空 Token")
@@ -170,16 +174,16 @@ class AgentEvaluationLedgerRepositoryTest {
         newStage(run, testCase, "claim-key", now)
     );
 
-    int first = stageRepository.claim(
+    int first = transactionTemplate.execute(status -> stageRepository.claim(
         stage.getId(),
         Set.of(AgentEvaluationStageStatus.PENDING, AgentEvaluationStageStatus.RETRY_WAITING),
         now.plusSeconds(1)
-    );
-    int second = stageRepository.claim(
+    ));
+    int second = transactionTemplate.execute(status -> stageRepository.claim(
         stage.getId(),
         Set.of(AgentEvaluationStageStatus.PENDING, AgentEvaluationStageStatus.RETRY_WAITING),
         now.plusSeconds(2)
-    );
+    ));
 
     assertThat(first).isOne();
     assertThat(second).isZero();
