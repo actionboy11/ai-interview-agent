@@ -81,7 +81,17 @@ public enum ErrorCode {
     MODULE_NOT_FOUND(11008, "模块不存在"),
     VOICE_CONFIG_READ_FAILED(11009, "读取语音服务配置失败"),
     VOICE_CONFIG_WRITE_FAILED(11010, "写入语音服务配置失败"),
-    VOICE_CONFIG_TEST_FAILED(11011, "语音服务连通性测试失败");
+    VOICE_CONFIG_TEST_FAILED(11011, "语音服务连通性测试失败"),
+
+    // ========== 账号与邀请码错误 12xxx ==========
+    AUTH_INVALID_CREDENTIALS(12001, "用户名或密码错误"),
+    AUTH_ACCOUNT_DISABLED(12002, "账号已禁用"),
+    AUTH_USERNAME_TAKEN(12003, "用户名已存在"),
+    AUTH_USER_NOT_FOUND(12004, "用户不存在"),
+    AUTH_INVITE_INVALID(12005, "邀请码无效、已使用、已撤销或已过期"),
+    AUTH_ADMIN_REQUIRED(12006, "需要启用的管理员账号"),
+    AUTH_INVALID_INPUT(12007, "账号参数无效"),
+    AUTH_BOOTSTRAP_INVALID(12008, "初始管理员配置无效");
 
     private final Integer code;
     private final String message;

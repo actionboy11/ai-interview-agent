@@ -107,6 +107,11 @@ spring:
 
 # Application custom configuration
 app:
+  auth:
+    bootstrap:
+      username: ${APP_AUTH_BOOTSTRAP_USERNAME:}
+      password: ${APP_AUTH_BOOTSTRAP_PASSWORD:}
+      display-name: ${APP_AUTH_BOOTSTRAP_DISPLAY_NAME:}
   agent-evaluation:
     enabled: ${APP_AGENT_EVALUATION_ENABLED:false}
     artifact-key: ${APP_AGENT_EVALUATION_ARTIFACT_KEY:}
