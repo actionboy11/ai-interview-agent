@@ -2,6 +2,8 @@
 # 测试环境配置文件
 
 spring:
+  flyway:
+    enabled: false
   rabbitmq:
     listener:
       simple:

@@ -127,6 +127,7 @@ services:
         condition: service_completed_successfully
     environment:
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:+ExitOnOutOfMemoryError
+      SPRING_PROFILES_ACTIVE: prod
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}

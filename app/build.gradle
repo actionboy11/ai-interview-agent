@@ -31,6 +31,9 @@ dependencies {
 
     // PostgreSQL
     runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
 
     // H2 Database for testing
     testRuntimeOnly 'com.h2database:h2'
@@ -91,6 +94,7 @@ dependencies {
     testImplementation platform('org.testcontainers:testcontainers-bom:1.20.6')
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:rabbitmq'
+    testImplementation 'org.testcontainers:postgresql'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -107,6 +111,8 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // Some H2 JPA slices do not activate the test profile. PostgreSQL migration tests opt in.
+    systemProperty 'spring.flyway.enabled', 'false'
 }
 
 // 将仓库根目录 .env 注入 bootRun，便于本地加载 AI_BAILIAN_API_KEY 等变量（Gradle 进程默认不读 .env）

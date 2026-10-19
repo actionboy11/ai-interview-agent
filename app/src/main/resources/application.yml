@@ -57,6 +57,12 @@ spring:
     password: ${POSTGRES_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
 
+  flyway:
+    enabled: true
+    # Existing Hibernate-managed databases already represent V1; never replay it on their data.
+    baseline-on-migrate: true
+    baseline-version: 1
+
   jpa:
     hibernate:
       ddl-auto: update #首次启动用 create，表创建成功后，改回 update

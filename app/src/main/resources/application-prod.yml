@@ -1,0 +1,8 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    vectorstore:
+      pgvector:
+        initialize-schema: false
