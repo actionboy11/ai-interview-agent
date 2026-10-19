@@ -37,12 +37,12 @@ class FlywayBaselineIntegrationTest {
       DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 
   @Test
-  @DisplayName("全新 PostgreSQL 数据库通过 V1 创建完整业务结构和向量索引")
+  @DisplayName("全新 PostgreSQL 数据库通过 V1 和 V2 创建完整业务结构和向量索引")
   void migratesCleanDatabase() throws Exception {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -52,7 +52,7 @@ class FlywayBaselineIntegrationTest {
         "llm_provider_config", "llm_global_setting", "voice_interview_sessions",
         "voice_interview_messages", "voice_interview_evaluations", "voice_evaluation_dead_letters",
         "agent_evaluation_runs", "agent_evaluation_cases", "agent_evaluation_stages",
-        "ai_call_audits", "vector_store");
+        "ai_call_audits", "vector_store", "users", "registration_invites");
     assertThat(jdbc.queryForObject("select count(*) from pg_extension where extname = 'vector'",
         Integer.class)).isEqualTo(1);
     assertThat(jdbc.queryForObject("""
@@ -99,11 +99,11 @@ class FlywayBaselineIntegrationTest {
       """;
 
   @Test
-  @DisplayName("已有 Hibernate V1 结构基线到版本 1 时保留业务数据")
+  @DisplayName("已有 Hibernate V1 结构基线后迁移至 V2 并保留业务数据")
   void baselinesLegacySchemaWithoutLosingData() throws Exception {
     JdbcTemplate jdbc = database("legacy_install");
     // Build the legacy fixture independently from V1, using the existing entity mappings.
-    hibernateSchema("legacy_install", "create");
+    hibernateSchema("legacy_install", "create", true);
     var vectorStore = PgVectorStore.builder(jdbc, mock(EmbeddingModel.class))
         .dimensions(1024).initializeSchema(true).indexType(PgIndexType.HNSW)
         .distanceType(PgDistanceType.COSINE_DISTANCE).build();
@@ -115,8 +115,9 @@ class FlywayBaselineIntegrationTest {
     jdbc.execute("insert into vector_store (content) values ('legacy vector content')");
 
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isZero();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+    assertThat(jdbc.queryForObject("select to_regclass('public.users')", String.class)).isNull();
+    assertThat(flyway.migrate().migrationsExecuted).isOne();
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
@@ -138,7 +139,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("1");
+          .isEqualTo("2");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(
@@ -174,6 +175,10 @@ class FlywayBaselineIntegrationTest {
   }
 
   private void hibernateSchema(String schema, String action) throws Exception {
+    hibernateSchema(schema, action, false);
+  }
+
+  private void hibernateSchema(String schema, String action, boolean legacyV1) throws Exception {
     var registry = new StandardServiceRegistryBuilder()
         .applySetting("hibernate.connection.url", url(schema))
         .applySetting("hibernate.connection.username", POSTGRES.getUsername())
@@ -188,10 +193,13 @@ class FlywayBaselineIntegrationTest {
       scanner.addIncludeFilter(new AnnotationTypeFilter(Entity.class));
       var sources = new MetadataSources(registry);
       for (var candidate : scanner.findCandidateComponents("interview.guide.modules")) {
-        sources.addAnnotatedClass(Class.forName(candidate.getBeanClassName()));
+        String className = candidate.getBeanClassName();
+        if (!legacyV1 || !className.startsWith("interview.guide.modules.auth.")) {
+          sources.addAnnotatedClass(Class.forName(className));
+        }
       }
       try (var sessionFactory = sources.buildMetadata().buildSessionFactory()) {
-        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(21);
+        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(legacyV1 ? 21 : 23);
       }
     } finally {
       StandardServiceRegistryBuilder.destroy(registry);
