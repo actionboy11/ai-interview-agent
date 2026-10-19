@@ -7,7 +7,7 @@ logging:
     file: UTF-8
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   # 明确指定HTTP响应编码
   servlet:
     encoding:
@@ -30,6 +30,11 @@ spring:
     import: optional:classpath:voice-interview-opening.yml
   application:
     name: ai-interview-platform
+
+  session:
+    timeout: 30m
+    redis:
+      namespace: interview-guide:sessions
 
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
