@@ -2,10 +2,20 @@ package interview.guide.modules.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.config.AuthBootstrapProperties;
 import interview.guide.modules.auth.model.UserRole;
+import interview.guide.modules.auth.repository.UserRepository;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.DefaultApplicationArguments;
@@ -16,6 +26,89 @@ import org.springframework.core.io.ClassPathResource;
 
 @DisplayName("初始管理员引导")
 class InitialAdminBootstrapTest extends AuthServiceTestSupport {
+  @Test
+  @DisplayName("并发启动均先读到管理员不存在时仍能完成且仅创建一个管理员")
+  void concurrentBootstrapsRecoverCreateCollision() throws Exception {
+    var initialReads = new CountDownLatch(2);
+    var releaseReads = new CountDownLatch(1);
+    var lookupCount = new AtomicInteger();
+    var coordinatedUsers = mock(UserRepository.class, delegatesTo(users));
+    doAnswer(invocation -> {
+      var result = users.findByNormalizedUsername("admin");
+      if (lookupCount.incrementAndGet() <= 2) {
+        assertThat(result).isEmpty();
+        initialReads.countDown();
+        if (!releaseReads.await(10, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("Bootstrap reads were not released");
+        }
+      }
+      return result;
+    }).when(coordinatedUsers).findByNormalizedUsername("admin");
+    var first = new InitialAdminBootstrap(bootstrapProperties(), coordinatedUsers, accounts,
+        new UsernameNormalizer());
+    var second = new InitialAdminBootstrap(bootstrapProperties(), coordinatedUsers, accounts,
+        new UsernameNormalizer());
+    try (var executor = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>())) {
+      var firstResult = executor.submit(() -> first.run(new DefaultApplicationArguments()));
+      var secondResult = executor.submit(() -> second.run(new DefaultApplicationArguments()));
+      assertThat(initialReads.await(10, TimeUnit.SECONDS)).isTrue();
+      releaseReads.countDown();
+      firstResult.get(10, TimeUnit.SECONDS);
+      secondResult.get(10, TimeUnit.SECONDS);
+      assertThat(users.count()).isOne();
+      assertThat(auth.authenticate("ADMIN", "initial-secret").getRole()).isEqualTo(UserRole.ADMIN);
+    } finally {
+      releaseReads.countDown();
+    }
+  }
+
+  @Test
+  @DisplayName("并发出现同名普通用户时引导失败且不得提升角色")
+  void concurrentOrdinaryUserIsNotAccepted() throws Exception {
+    var initialRead = new CountDownLatch(1);
+    var releaseRead = new CountDownLatch(1);
+    var lookupCount = new AtomicInteger();
+    var coordinatedUsers = mock(UserRepository.class, delegatesTo(users));
+    doAnswer(invocation -> {
+      var result = users.findByNormalizedUsername("admin");
+      if (lookupCount.incrementAndGet() == 1) {
+        assertThat(result).isEmpty();
+        initialRead.countDown();
+        if (!releaseRead.await(10, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("Bootstrap read was not released");
+        }
+      }
+      return result;
+    }).when(coordinatedUsers).findByNormalizedUsername("admin");
+    var bootstrap = new InitialAdminBootstrap(bootstrapProperties(), coordinatedUsers, accounts,
+        new UsernameNormalizer());
+    try (var executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>())) {
+      var result = executor.submit(() -> {
+        assertThatThrownBy(() -> bootstrap.run(new DefaultApplicationArguments()))
+            .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+                .isEqualTo(ErrorCode.AUTH_BOOTSTRAP_INVALID.getCode()));
+      });
+      assertThat(initialRead.await(10, TimeUnit.SECONDS)).isTrue();
+      var ordinaryUser = createUser("Admin", UserRole.USER);
+      releaseRead.countDown();
+      result.get(10, TimeUnit.SECONDS);
+      assertThat(users.count()).isOne();
+      assertThat(users.findById(ordinaryUser.getId()).orElseThrow().getRole()).isEqualTo(UserRole.USER);
+    } finally {
+      releaseRead.countDown();
+    }
+  }
+
+  private AuthBootstrapProperties bootstrapProperties() {
+    var properties = new AuthBootstrapProperties();
+    properties.setUsername("ADMIN");
+    properties.setPassword("initial-secret");
+    properties.setDisplayName("管理员");
+    return properties;
+  }
+
   @Test
   @DisplayName("从配置创建管理员且重复启动不改写已有密码和状态")
   void bootstrapsIdempotently() throws Exception {

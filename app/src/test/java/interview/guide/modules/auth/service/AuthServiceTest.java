@@ -2,6 +2,10 @@ package interview.guide.modules.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
@@ -11,10 +15,30 @@ import java.util.Locale;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @DisplayName("账号服务")
 class AuthServiceTest extends AuthServiceTestSupport {
+  @Test
+  @DisplayName("不存在用户的登录也执行真实 BCrypt 校验且复用固定有效哈希")
+  void checksFixedDummyHashForMissingUsers() {
+    var service = new AuthService(users, new UsernameNormalizer());
+    var passwordChecks = spy(new BCryptPasswordEncoder());
+    ReflectionTestUtils.setField(service, "passwords", passwordChecks);
+    for (String username : new String[] {"missing-one", "missing-two"}) {
+      assertThatThrownBy(() -> service.authenticate(username, "wrong-password"))
+          .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+              .isEqualTo(ErrorCode.AUTH_INVALID_CREDENTIALS.getCode()));
+    }
+    var hashes = ArgumentCaptor.forClass(String.class);
+    verify(passwordChecks, times(2)).matches(eq("wrong-password"), hashes.capture());
+    assertThat(hashes.getAllValues()).allSatisfy(hash ->
+        assertThat(hash).matches("\\$2[aby]\\$10\\$[./A-Za-z0-9]{53}"));
+    assertThat(hashes.getAllValues().get(0)).isEqualTo(hashes.getAllValues().get(1));
+  }
+
   @Test
   @DisplayName("管理员创建临时密码用户并只保存 BCrypt 哈希")
   void storesBcryptAndRequiresPasswordChange() {

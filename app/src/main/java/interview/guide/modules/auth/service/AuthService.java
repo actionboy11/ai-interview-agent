@@ -16,14 +16,25 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+  // Fixed cost-10 BCrypt value, matching the encoder's default work factor; never an account password.
+  private static final String DUMMY_PASSWORD_HASH =
+      "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
   private final UserRepository users;
   private final UsernameNormalizer normalizer;
   private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
 
   @Transactional
   public UserEntity authenticate(String username, String rawPassword) {
+    if (rawPassword == null || rawPassword.getBytes(StandardCharsets.UTF_8).length > 72) {
+      throw invalidCredentials();
+    }
     var user = users.findByNormalizedUsername(normalizer.normalize(username))
-        .orElseThrow(() -> invalidCredentials());
+        .orElse(null);
+    if (user == null) {
+      passwords.matches(rawPassword, DUMMY_PASSWORD_HASH);
+      throw invalidCredentials();
+    }
     checkPassword(user, rawPassword);
     checkActive(user);
     Instant now = Instant.now();
