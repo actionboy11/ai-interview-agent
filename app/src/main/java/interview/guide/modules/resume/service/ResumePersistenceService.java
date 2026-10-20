@@ -21,6 +21,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,15 +56,6 @@ public class ResumePersistenceService {
             // 查询数据库中是否已有相同hash的简历
             // spring data jpa 会自动生成查询语句
             Optional<ResumeEntity> existing = resumeRepository.findByOwnerIdAndFileHash(ownerId, fileHash);
-            //existing,isPresent() 这个方法会返回一个布尔值，表示Optional中是否包含值
-            if (existing.isPresent()) {
-                log.info("检测到重复简历: hash={}", fileHash);
-                //existing.get() 返回Optional中包含的值，即ResumeEntity对象
-                ResumeEntity resume = existing.get();
-                resume.incrementAccessCount();
-                resumeRepository.save(resume);
-            }
-            
             return existing;
         } catch (Exception e) {
             log.error("检查简历重复时出错: {}", e.getMessage());
@@ -91,10 +83,18 @@ public class ResumePersistenceService {
             resume.setStorageUrl(storageUrl);
             resume.setResumeText(resumeText);
             
-            ResumeEntity saved = resumeRepository.save(resume);
+            ResumeEntity saved = resumeRepository.saveAndFlush(resume);
             log.info("简历已保存: id={}, hash={}", saved.getId(), fileHash);
             
             return saved;
+        } catch (DataIntegrityViolationException e) {
+            if (e.getMostSpecificCause() instanceof SQLException sqlException
+                && "23505".equals(sqlException.getSQLState())) {
+                log.info("重复简历上传: ownerId={}", ownerId);
+                throw new BusinessException(ErrorCode.RESUME_DUPLICATE, "简历已存在");
+            }
+            log.error("保存简历违反数据库约束: ownerId={}", ownerId, e);
+            throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败");
         } catch (Exception e) {
             log.error("保存简历失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败");

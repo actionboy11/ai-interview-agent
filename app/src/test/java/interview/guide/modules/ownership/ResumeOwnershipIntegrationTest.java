@@ -54,7 +54,12 @@ class ResumeOwnershipIntegrationTest extends WorkflowOwnershipTestSupport {
     });
     var result = resumeUpload.uploadAndAnalyze(file);
     assertThat(result.get("duplicate")).isEqualTo(false);
-    assertThat(resumeUpload.uploadAndAnalyze(file).get("duplicate")).isEqualTo(true);
+    assertThatThrownBy(() -> resumeUpload.uploadAndAnalyze(file))
+        .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+            .isEqualTo(ErrorCode.RESUME_DUPLICATE.getCode()));
+    when(currentUser.requireUserId()).thenReturn(second.getId());
+    assertThat(resumeUpload.uploadAndAnalyze(file).get("duplicate")).isEqualTo(false);
+    when(currentUser.requireUserId()).thenReturn(first.getId());
     var legacy = resume(first, UUID.randomUUID().toString());
     legacy.setResumeText(null);
     resumes.saveAndFlush(legacy);
@@ -65,6 +70,28 @@ class ResumeOwnershipIntegrationTest extends WorkflowOwnershipTestSupport {
         });
     resumeUpload.reanalyze(legacy.getId());
     assertThat(resumes.findById(legacy.getId()).orElseThrow().getResumeText()).isEqualTo("Recovered");
+  }
+
+  @Test
+  @DisplayName("并发重复入库由所有者哈希唯一约束映射为简历重复错误")
+  void mapsUniqueConstraintToDuplicateError() {
+    var file = new MockMultipartFile("file", "resume.txt", "text/plain",
+        "race test".getBytes(StandardCharsets.UTF_8));
+    resumePersistence.saveResume(file, "Resume", "resumes/first", "url");
+    assertThatThrownBy(() -> resumePersistence.saveResume(file, "Resume", "resumes/second", "url"))
+        .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+            .isEqualTo(ErrorCode.RESUME_DUPLICATE.getCode()));
+  }
+
+  @Test
+  @DisplayName("其他数据库约束错误不能伪装为简历重复")
+  void doesNotMisclassifyOtherConstraintErrors() {
+    var file = new MockMultipartFile("file", "resume.txt", "text/plain",
+        "missing owner".getBytes(StandardCharsets.UTF_8));
+    when(currentUser.requireUserId()).thenReturn(UUID.randomUUID());
+    assertThatThrownBy(() -> resumePersistence.saveResume(file, "Resume", "resumes/key", "url"))
+        .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+            .isEqualTo(ErrorCode.RESUME_UPLOAD_FAILED.getCode()));
   }
 
   @Test

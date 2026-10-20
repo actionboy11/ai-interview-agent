@@ -28,14 +28,17 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
   @EntityGraph(attributePaths = {"resume", "answers"})
   Optional<InterviewSessionEntity> findByOwnerIdAndSessionId(UUID ownerId, String sessionId);
 
+  @EntityGraph(attributePaths = {"resume", "resume.owner"})
   List<InterviewSessionEntity> findByOwnerIdAndResumeIdOrderByCreatedAtDesc(UUID ownerId, Long resumeId);
 
+  @EntityGraph(attributePaths = {"resume", "resume.owner"})
   Optional<InterviewSessionEntity> findFirstByOwnerIdAndResumeIdAndStatusInOrderByCreatedAtDesc(
       UUID ownerId, Long resumeId, List<SessionStatus> statuses);
 
   @EntityGraph(attributePaths = "resume")
   List<InterviewSessionEntity> findTop10ByOwnerIdAndSkillIdOrderByCreatedAtDesc(UUID ownerId, String skillId);
 
+  @EntityGraph(attributePaths = {"resume", "resume.owner"})
   List<InterviewSessionEntity> findTop10ByOwnerIdAndResumeIdAndSkillIdOrderByCreatedAtDesc(
       UUID ownerId, Long resumeId, String skillId);
 

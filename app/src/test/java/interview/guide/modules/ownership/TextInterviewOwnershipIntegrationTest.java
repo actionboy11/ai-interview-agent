@@ -31,7 +31,9 @@ import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublis
 import interview.guide.modules.interview.listener.EvaluateStreamConsumer;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
+import jakarta.persistence.EntityManager;
 import org.redisson.api.stream.StreamMessageId;
 import org.springframework.test.util.ReflectionTestUtils;
 import com.rabbitmq.client.Channel;
@@ -47,9 +49,33 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @DisplayName("文字面试工作流双用户隔离")
 class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport {
+  @Autowired EntityManager entityManager;
+  @Autowired TransactionalExecutor transactionalExecutor;
+
+  @Test
+  @DisplayName("无缓存与持久化上下文时仍能恢复自己的简历面试并读取历史题目")
+  void coldResumeRecoveryAndHistory() {
+    var ownResume = resume(first, UUID.randomUUID().toString());
+    var interview = session(first);
+    interview.setResume(ownResume);
+    interview.setSkillId("java");
+    interview.setQuestionsJson("[{\"questionIndex\":0,\"question\":\"Cold question\","
+        + "\"type\":\"TECHNICAL\",\"category\":\"Java\",\"isFollowUp\":false}]");
+    sessions.saveAndFlush(interview);
+    transactionalExecutor.run(entityManager::clear);
+    cachedValues.clear();
+
+    assertThat(interviewService.findUnfinishedSessionOrThrow(ownResume.getId()).sessionId())
+        .isEqualTo(interview.getSessionId());
+    transactionalExecutor.run(entityManager::clear);
+    assertThat(interviewPersistence.getHistoricalQuestions("java", ownResume.getId()))
+        .extracting(value -> value.question()).containsExactly("Cold question");
+  }
+
   @Test
   @DisplayName("自己的会话可以创建、恢复、暂存、提交、生成报告、导出和删除")
   void permitsOwnerLifecycleAndDiscardsDeletedCache() {

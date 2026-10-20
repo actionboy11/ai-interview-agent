@@ -7,7 +7,6 @@ import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
-import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
@@ -69,10 +68,7 @@ public class ResumeUploadService {
         // 它提供了一种优雅的方式来处理可能为null的值，避免了直接使用null导致的空指针异常。
         Optional<ResumeEntity> existingResume = persistenceService.findExistingResume(file);
         if (existingResume.isPresent()) {
-            log.info("简历上传处理完成（重复）: {} - 耗时: {}ms",
-                fileName, System.currentTimeMillis() - startTime);
-            // 如果检测到重复简历，直接返回历史分析结果
-            return handleDuplicateResume(existingResume.get());
+            throw new BusinessException(ErrorCode.RESUME_DUPLICATE, "简历已存在");
         }
 
         // 4. 解析简历文本
@@ -139,40 +135,6 @@ public class ResumeUploadService {
             appConfig.getAllowedTypes(),
             "不支持的文件类型: " + contentType
         );
-    }
-
-    /**
-     * 处理重复简历
-     */
-    private Map<String, Object> handleDuplicateResume(ResumeEntity resume) {
-        log.info("检测到重复简历，返回历史分析结果: resumeId={}", resume.getId());
-
-        // 获取历史分析结果
-        Optional<ResumeAnalysisResponse> analysisOpt = persistenceService.getLatestAnalysisAsDTO(resume.getId());
-
-        // 已有分析结果，直接返回
-        // 没有分析结果（可能之前分析失败），返回当前状态
-        return analysisOpt.map(resumeAnalysisResponse -> Map.of(
-                "analysis", resumeAnalysisResponse,
-                "storage", Map.of(
-                        "fileKey", resume.getStorageKey() != null ? resume.getStorageKey() : "",
-                        "fileUrl", resume.getStorageUrl() != null ? resume.getStorageUrl() : "",
-                        "resumeId", resume.getId()
-                ),
-                "duplicate", true
-        )).orElseGet(() -> Map.of(
-                "resume", Map.of(
-                        "id", resume.getId(),
-                        "filename", resume.getOriginalFilename(),
-                        "analyzeStatus", resume.getAnalyzeStatus() != null ? resume.getAnalyzeStatus().name() : AsyncTaskStatus.PENDING.name()
-                ),
-                "storage", Map.of(
-                        "fileKey", resume.getStorageKey() != null ? resume.getStorageKey() : "",
-                        "fileUrl", resume.getStorageUrl() != null ? resume.getStorageUrl() : "",
-                        "resumeId", resume.getId()
-                ),
-                "duplicate", true
-        ));
     }
 
     /**
