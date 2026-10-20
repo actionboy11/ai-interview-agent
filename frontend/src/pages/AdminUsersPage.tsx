@@ -4,6 +4,7 @@ import { adminApi } from '../api/auth';
 import { getErrorMessage } from '../api/request';
 import { authButtonClass, authInputClass } from '../components/AuthPageShell';
 import { useAuth } from '../hooks/useAuth';
+import { isSameUserId } from '../utils/userId';
 import type { AdminUser, IssuedInvite, UserRole, UserStatus } from '../types/auth';
 
 export default function AdminUsersPage() {
@@ -44,7 +45,7 @@ export default function AdminUsersPage() {
 
   const changeStatus = async (status: UserStatus) => {
     const id = targetId.trim();
-    if (!id || (status === 'DISABLED' && id === currentUser?.id)) {
+    if (!id || !currentUser || (status === 'DISABLED' && isSameUserId(id, currentUser.id))) {
       setError('不能禁用当前登录账号');
       return;
     }
@@ -52,8 +53,8 @@ export default function AdminUsersPage() {
     setError('');
     setSuccess('');
     try {
-      await (status === 'ACTIVE' ? adminApi.enableUser(id) : adminApi.disableUser(id));
-      setUsers(previous => previous.map(user => user.id === id ? { ...user, status } : user));
+      await (status === 'ACTIVE' ? adminApi.enableUser(id) : adminApi.disableUser(id, currentUser.id));
+      setUsers(previous => previous.map(user => isSameUserId(user.id, id) ? { ...user, status } : user));
       setSuccess(status === 'ACTIVE' ? '账号已启用。' : '账号已禁用，现有会话已失效。');
     } catch (err) {
       setError(getErrorMessage(err));
@@ -116,7 +117,7 @@ export default function AdminUsersPage() {
               <label className={labelClass}>用户 UUID<input name="userId" required pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" placeholder="输入用户 UUID" value={targetId} onChange={event => setTargetId(event.target.value)} disabled={busy} className={`${authInputClass} font-mono`} /></label>
               <div className="flex gap-3">
                 <button type="submit" value="enable" disabled={busy || !targetId.trim()} className={authButtonClass}><CheckCircle2 className="h-4 w-4" />启用</button>
-                <button type="submit" value="disable" disabled={busy || !targetId.trim() || targetId.trim() === currentUser?.id} className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-3 font-medium text-red-600 disabled:opacity-50"><Ban className="h-4 w-4" />禁用</button>
+                <button type="submit" value="disable" disabled={busy || !targetId.trim() || isSameUserId(targetId, currentUser?.id)} className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-3 font-medium text-red-600 disabled:opacity-50"><Ban className="h-4 w-4" />禁用</button>
               </div>
               {(pending === 'ACTIVE' || pending === 'DISABLED') && <p role="status" className="text-sm text-slate-500">正在更新账号…</p>}
             </form>

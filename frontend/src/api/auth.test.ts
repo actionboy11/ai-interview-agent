@@ -42,11 +42,25 @@ test('管理操作遵守现有后端路径和 DTO', async () => {
     return { data: { code: 200, message: 'success', data: {} }, status: 200, statusText: 'OK', headers: {}, config };
   };
   await adminApi.createUser({ username: 'bob', password: 'temporary-password', displayName: 'Bob', role: 'USER' });
-  await adminApi.disableUser('target-id');
+  await adminApi.disableUser('target-id', 'current-admin-id');
   await adminApi.enableUser('target-id');
   await adminApi.issueInvite({ ttlSeconds: 3600 });
   assert.deepEqual(calls.map(call => call.url), ['/api/admin/users', '/api/admin/users/target-id/disable', '/api/admin/users/target-id/enable', '/api/admin/invites']);
   assert.deepEqual(calls[3].data, { ttlSeconds: 3600 });
+});
+
+test('当前管理员 UUID 的大小写变体不能发出禁用请求', async () => {
+  const calls: string[] = [];
+  request.getInstance().defaults.adapter = async config => {
+    calls.push(config.url!);
+    const data = config.url === '/api/auth/csrf' ? { headerName: 'X-XSRF-TOKEN', token: 'admin-token' } : null;
+    return { data: { code: 200, message: 'success', data }, status: 200, statusText: 'OK', headers: {}, config };
+  };
+  const currentAdminId = 'abcdef12-3456-789a-bcde-f0123456789a';
+  for (const targetId of ['ABCDEF12-3456-789A-BCDE-F0123456789A', currentAdminId, '  AbCdEf12-3456-789A-bCdE-f0123456789A  ']) {
+    await assert.rejects(adminApi.disableUser(targetId, currentAdminId), /不能禁用当前登录账号/);
+  }
+  assert.deepEqual(calls, []);
 });
 
 test('登录已成功时，下一次 CSRF 获取失败不能回滚内存中的登录状态', async () => {

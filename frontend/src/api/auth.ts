@@ -1,4 +1,5 @@
 import request, { clearCsrfToken } from './request.ts';
+import { isSameUserId } from '../utils/userId.ts';
 import type {
   AdminCreateUserRequest, AdminUser, ChangePasswordRequest, CreateInviteRequest,
   CurrentUser, InviteRegistrationRequest, IssuedInvite, LoginRequest,
@@ -22,7 +23,10 @@ export const authApi = {
 
 export const adminApi = {
   createUser: (body: AdminCreateUserRequest) => request.post<AdminUser>('/api/admin/users', body),
-  disableUser: (id: string) => request.post<void>(`/api/admin/users/${encodeURIComponent(id)}/disable`),
+  async disableUser(id: string, currentUserId: string): Promise<void> {
+    if (isSameUserId(id, currentUserId)) throw new Error('不能禁用当前登录账号');
+    await request.post<void>(`/api/admin/users/${encodeURIComponent(id)}/disable`);
+  },
   enableUser: (id: string) => request.post<void>(`/api/admin/users/${encodeURIComponent(id)}/enable`),
   issueInvite: (body: CreateInviteRequest) => request.post<IssuedInvite>('/api/admin/invites', body),
 };
