@@ -3,6 +3,7 @@ package interview.guide.infrastructure.file;
 import interview.guide.common.config.StorageConfigProperties;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ public class FileStorageService {
 
     private final S3Client s3Client;
     private final StorageConfigProperties storageConfig;
+    private final CurrentUserProvider currentUser;
 
     @PostConstruct
     public void init() {
@@ -54,7 +56,7 @@ public class FileStorageService {
      * 上传简历文件
      */
     public String uploadResume(MultipartFile file) {
-        return uploadFile(file, "resumes");
+        return uploadFile(file, "resumes/" + currentUser.requireUserId());
     }
 
     /**

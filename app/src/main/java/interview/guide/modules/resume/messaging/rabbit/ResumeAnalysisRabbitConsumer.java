@@ -50,7 +50,7 @@ public class ResumeAnalysisRabbitConsumer {
             return;
         }
 
-        ResumeEntity resume = persistenceService.findById(task.resumeId()).orElse(null);
+        ResumeEntity resume = persistenceService.findByIdInternal(task.resumeId()).orElse(null);
         if (resume == null
             || resume.getAnalyzeStatus() == AsyncTaskStatus.COMPLETED
             || persistenceService.isAnalysisMessageCompleted(task.messageId().toString())) {

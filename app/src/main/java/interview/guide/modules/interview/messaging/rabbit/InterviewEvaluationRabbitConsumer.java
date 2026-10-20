@@ -78,6 +78,12 @@ public class InterviewEvaluationRabbitConsumer {
     }
 
     InterviewSessionEntity session = sessionOpt.get();
+    if (session.getOwner() == null || (session.getResume() != null
+        && !session.getOwner().getId().equals(session.getResume().getOwner().getId()))) {
+      log.warn("Discarding inconsistent ownership graph: sessionId={}", task.sessionId());
+      channel.basicAck(deliveryTag, false);
+      return;
+    }
     if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
         || task.messageId().toString().equals(session.getEvaluationMessageId())) {
       channel.basicAck(deliveryTag, false);
@@ -85,7 +91,7 @@ public class InterviewEvaluationRabbitConsumer {
     }
 
     try {
-      persistenceService.updateEvaluateStatus(
+      persistenceService.updateEvaluateStatusInternal(
           task.sessionId(),
           AsyncTaskStatus.PROCESSING,
           null
@@ -96,7 +102,7 @@ public class InterviewEvaluationRabbitConsumer {
           report,
           task.messageId().toString()
       );
-      syncEvaluatedStatusToCache(task.sessionId());
+      syncEvaluatedStatusToCache(session);
       channel.basicAck(deliveryTag, false);
     } catch (Exception exception) {
       routeFailure(task, deliveryTag, channel, exception);
@@ -106,9 +112,11 @@ public class InterviewEvaluationRabbitConsumer {
   /**
    * 评估完成后同步缓存状态。缓存是派生态，同步失败不影响主流程。
    */
-  private void syncEvaluatedStatusToCache(String sessionId) {
+  private void syncEvaluatedStatusToCache(InterviewSessionEntity session) {
+    String sessionId = session.getSessionId();
     try {
-      sessionCache.updateSessionStatus(sessionId, InterviewSessionDTO.SessionStatus.EVALUATED);
+      sessionCache.updateSessionStatusInternal(session.getOwner().getId(), sessionId,
+          InterviewSessionDTO.SessionStatus.EVALUATED);
     } catch (Exception e) {
       log.warn("同步评估完成状态到缓存失败: sessionId={}, error={}", sessionId, e.getMessage());
     }
@@ -121,7 +129,7 @@ public class InterviewEvaluationRabbitConsumer {
         }
     );
     List<InterviewAnswerEntity> answers =
-        persistenceService.findAnswersBySessionId(session.getSessionId());
+        persistenceService.findAnswersBySessionIdInternal(session.getSessionId());
     for (InterviewAnswerEntity answer : answers) {
       int index = answer.getQuestionIndex();
       if (index >= 0 && index < questions.size()) {
@@ -155,7 +163,7 @@ public class InterviewEvaluationRabbitConsumer {
     var destination = retryPolicy.destinationFor(task.retryCount());
     try {
       if (destination.deadLetter()) {
-        persistenceService.updateEvaluateStatus(
+        persistenceService.updateEvaluateStatusInternal(
             task.sessionId(),
             AsyncTaskStatus.FAILED,
             reason

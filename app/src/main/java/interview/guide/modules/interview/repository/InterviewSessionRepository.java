@@ -4,6 +4,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.InterviewSessionEntity.SessionStatus;
 import interview.guide.modules.resume.model.ResumeEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -21,9 +22,22 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
 
   Optional<InterviewSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
+  @EntityGraph(attributePaths = "resume")
   List<InterviewSessionEntity> findByOwnerIdOrderByCreatedAtDesc(UUID ownerId);
 
+  @EntityGraph(attributePaths = {"resume", "answers"})
   Optional<InterviewSessionEntity> findByOwnerIdAndSessionId(UUID ownerId, String sessionId);
+
+  List<InterviewSessionEntity> findByOwnerIdAndResumeIdOrderByCreatedAtDesc(UUID ownerId, Long resumeId);
+
+  Optional<InterviewSessionEntity> findFirstByOwnerIdAndResumeIdAndStatusInOrderByCreatedAtDesc(
+      UUID ownerId, Long resumeId, List<SessionStatus> statuses);
+
+  @EntityGraph(attributePaths = "resume")
+  List<InterviewSessionEntity> findTop10ByOwnerIdAndSkillIdOrderByCreatedAtDesc(UUID ownerId, String skillId);
+
+  List<InterviewSessionEntity> findTop10ByOwnerIdAndResumeIdAndSkillIdOrderByCreatedAtDesc(
+      UUID ownerId, Long resumeId, String skillId);
 
     /**
      * 根据会话ID查找
@@ -87,6 +101,7 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
     /**
      * 查找创建时间早于指定时刻、且处于给定状态的会话（用于超时未完成会话清理）
      */
+    @EntityGraph(attributePaths = "resume")
     List<InterviewSessionEntity> findByStatusInAndCreatedAtBefore(
         List<SessionStatus> statuses,
         LocalDateTime before

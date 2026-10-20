@@ -107,8 +107,9 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
     @Override
     protected boolean shouldSkip(EvaluatePayload payload) {
-        return sessionRepository.findBySessionId(payload.sessionId())
-            .map(session -> session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED)
+        return sessionRepository.findBySessionIdWithResume(payload.sessionId())
+            .map(session -> !hasConsistentOwner(session)
+                || session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED)
             .orElse(true);
     }
 
@@ -127,12 +128,16 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         }
 
         InterviewSessionEntity session = sessionOpt.get();
+        if (!hasConsistentOwner(session)) {
+            log.warn("Discarding inconsistent ownership graph: sessionId={}", sessionId);
+            return;
+        }
         List<InterviewQuestionDTO> questions = objectMapper.readValue(
             session.getQuestionsJson(),
             new TypeReference<>() {}
         );
 
-        List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(sessionId);
+        List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionIdInternal(sessionId);
         for (InterviewAnswerEntity answer : answers) {
             int index = answer.getQuestionIndex();
             if (index >= 0 && index < questions.size()) {
@@ -147,7 +152,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
-        persistenceService.saveReport(sessionId, report);
+        persistenceService.saveReportInternal(sessionId, report);
     }
 
     @Override
@@ -161,7 +166,9 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
      */
     private void syncEvaluatedStatusToCache(String sessionId) {
         try {
-            sessionCache.updateSessionStatus(sessionId, InterviewSessionDTO.SessionStatus.EVALUATED);
+            sessionRepository.findBySessionIdWithResume(sessionId).filter(this::hasConsistentOwner)
+                .ifPresent(session -> sessionCache.updateSessionStatusInternal(
+                    session.getOwner().getId(), sessionId, InterviewSessionDTO.SessionStatus.EVALUATED));
         } catch (Exception e) {
             log.warn("同步评估完成状态到缓存失败: sessionId={}, error={}", sessionId, e.getMessage());
         }
@@ -199,7 +206,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
      */
     private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
         try {
-            sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
+            sessionRepository.findBySessionIdWithResume(sessionId).filter(this::hasConsistentOwner).ifPresent(session -> {
                 session.setEvaluateStatus(status);
                 session.setEvaluateError(error);
                 sessionRepository.save(session);
@@ -208,6 +215,11 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         } catch (Exception e) {
             log.error("更新评估状态失败: sessionId={}, status={}, error={}", sessionId, status, e.getMessage(), e);
         }
+    }
+
+    private boolean hasConsistentOwner(InterviewSessionEntity session) {
+        return session.getOwner() != null && (session.getResume() == null
+            || session.getOwner().getId().equals(session.getResume().getOwner().getId()));
     }
 
 }

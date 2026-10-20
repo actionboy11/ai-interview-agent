@@ -2,6 +2,7 @@ package interview.guide.infrastructure.redis;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import lombok.Data;
@@ -16,6 +17,7 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 面试会话 Redis 缓存服务
@@ -28,6 +30,7 @@ public class InterviewSessionCache {
 
     private final RedisService redisService;
     private final ObjectMapper objectMapper;
+    private final CurrentUserProvider currentUser;
 
     /**
      * 缓存键前缀
@@ -225,11 +228,39 @@ public class InterviewSessionCache {
     // ==================== 私有方法 ====================
 
     private String buildSessionKey(String sessionId) {
-        return SESSION_KEY_PREFIX + sessionId;
+        return SESSION_KEY_PREFIX + currentUser.requireUserId() + ":" + sessionId;
     }
 
     private String buildResumeSessionKey(Long resumeId) {
-        return RESUME_SESSION_KEY_PREFIX + resumeId;
+        return RESUME_SESSION_KEY_PREFIX + currentUser.requireUserId() + ":" + resumeId;
+    }
+
+    /** Internal worker cache synchronization; owner comes from a validated persisted session. */
+    public void updateSessionStatusInternal(UUID ownerId, String sessionId, SessionStatus status) {
+        String key = SESSION_KEY_PREFIX + ownerId + ":" + sessionId;
+        CachedSession session = redisService.get(key);
+        if (session == null) {
+            return;
+        }
+        session.setStatus(status);
+        redisService.set(key, session, SESSION_TTL);
+        if (!isUnfinishedStatus(status) && session.getResumeId() != null) {
+            removeMappingInternal(ownerId, session.getResumeId(), sessionId);
+        }
+    }
+
+    public void deleteSessionInternal(UUID ownerId, String sessionId, Long resumeId) {
+        redisService.delete(SESSION_KEY_PREFIX + ownerId + ":" + sessionId);
+        if (resumeId != null) {
+            removeMappingInternal(ownerId, resumeId, sessionId);
+        }
+    }
+
+    private void removeMappingInternal(UUID ownerId, Long resumeId, String sessionId) {
+        String key = RESUME_SESSION_KEY_PREFIX + ownerId + ":" + resumeId;
+        if (sessionId.equals(redisService.get(key))) {
+            redisService.delete(key);
+        }
     }
 
     private void saveResumeSessionMapping(Long resumeId, String sessionId) {

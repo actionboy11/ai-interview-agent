@@ -55,6 +55,9 @@ public class InterviewSessionService {
      * 前端应该先调用 findUnfinishedSession 检查，或者使用 forceCreate 参数强制创建
      */
     public InterviewSessionDTO createSession(CreateInterviewRequest request) {
+        if (request.resumeId() != null) {
+            persistenceService.requireOwnedResume(request.resumeId());
+        }
         // 如果指定了resumeId且未强制创建，检查是否有未完成的会话
         if (request.resumeId() != null && !Boolean.TRUE.equals(request.forceCreate())) {
             Optional<InterviewSessionDTO> unfinishedOpt = findUnfinishedSession(request.resumeId());
@@ -124,6 +127,7 @@ public class InterviewSessionService {
      * 获取会话信息（优先从缓存获取，缓存未命中则从数据库恢复）
      */
     public InterviewSessionDTO getSession(String sessionId) {
+        requireSession(sessionId);
         // 1. 尝试从 Redis 缓存获取
         Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
         if (cachedOpt.isPresent()) {
@@ -143,11 +147,13 @@ public class InterviewSessionService {
      * 查找并恢复未完成的面试会话
      */
     public Optional<InterviewSessionDTO> findUnfinishedSession(Long resumeId) {
+        persistenceService.requireOwnedResume(resumeId);
         try {
             // 1. 先从 Redis 缓存查找
             Optional<String> cachedSessionIdOpt = sessionCache.findUnfinishedSessionId(resumeId);
             if (cachedSessionIdOpt.isPresent()) {
                 String sessionId = cachedSessionIdOpt.get();
+                requireSession(sessionId);
                 Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
                 if (cachedOpt.isPresent()) {
                     log.debug("从 Redis 缓存找到未完成会话: resumeId={}, sessionId={}", resumeId, sessionId);
@@ -458,6 +464,7 @@ public class InterviewSessionService {
      * 获取或恢复会话（优先从缓存获取）
      */
     private CachedSession getOrRestoreSession(String sessionId) {
+        requireSession(sessionId);
         // 1. 尝试从 Redis 缓存获取
         Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
         if (cachedOpt.isPresent()) {
@@ -541,11 +548,12 @@ public class InterviewSessionService {
         for (InterviewSessionEntity session : staleSessions) {
             String sessionId = session.getSessionId();
             try {
-                persistenceService.updateSessionStatus(sessionId,
+                persistenceService.updateSessionStatusInternal(sessionId,
                     InterviewSessionEntity.SessionStatus.COMPLETED);
-                persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED,
+                persistenceService.updateEvaluateStatusInternal(sessionId, AsyncTaskStatus.FAILED,
                     "会话超过 " + STALE_SESSION_HOURS + " 小时未完成，已自动结束");
-                sessionCache.deleteSession(sessionId);
+                sessionCache.deleteSessionInternal(session.getOwner().getId(), sessionId,
+                    session.getResume() == null ? null : session.getResume().getId());
                 cleaned++;
             } catch (Exception e) {
                 log.warn("清理超时会话失败: sessionId={}, error={}", sessionId, e.getMessage());
@@ -589,5 +597,10 @@ public class InterviewSessionService {
             questions,
             session.getStatus()
         );
+    }
+
+    private InterviewSessionEntity requireSession(String sessionId) {
+        return persistenceService.findBySessionId(sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
     }
 }

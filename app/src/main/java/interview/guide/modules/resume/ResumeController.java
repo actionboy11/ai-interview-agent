@@ -2,6 +2,7 @@ package interview.guide.modules.resume;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.common.exception.BusinessException;
 import interview.guide.modules.resume.model.ResumeDetailDTO;
 import interview.guide.modules.resume.model.ResumeListItemDTO;
 import interview.guide.modules.resume.service.ResumeDeleteService;
@@ -96,6 +97,8 @@ public class ResumeController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(result.pdfBytes());
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("导出PDF失败: resumeId={}", id, e);
             return ResponseEntity.internalServerError().build();

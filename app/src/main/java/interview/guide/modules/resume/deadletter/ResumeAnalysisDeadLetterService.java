@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
 import interview.guide.modules.resume.messaging.rabbit.ResumeAnalysisMessage;
 import interview.guide.modules.resume.model.ResumeEntity;
@@ -23,19 +24,22 @@ public class ResumeAnalysisDeadLetterService {
     private final ResumeAnalysisTaskPublisher publisher;
     private final ObjectMapper objectMapper;
     private final TransactionalExecutor transactionalExecutor;
+    private final CurrentUserProvider currentUser;
 
     public ResumeAnalysisDeadLetterService(
         ResumeAnalysisDeadLetterRepository repository,
         ResumeRepository resumeRepository,
         ResumeAnalysisTaskPublisher publisher,
         ObjectMapper objectMapper,
-        TransactionalExecutor transactionalExecutor
+        TransactionalExecutor transactionalExecutor,
+        CurrentUserProvider currentUser
     ) {
         this.repository = repository;
         this.resumeRepository = resumeRepository;
         this.publisher = publisher;
         this.objectMapper = objectMapper;
         this.transactionalExecutor = transactionalExecutor;
+        this.currentUser = currentUser;
     }
 
     @Transactional
@@ -68,7 +72,7 @@ public class ResumeAnalysisDeadLetterService {
             Sort.by(Sort.Direction.DESC, "failedAt")
         );
         Page<ResumeAnalysisDeadLetterEntity> result =
-            status == null ? repository.findAll(request) : repository.findByStatus(status, request);
+            repository.findOwned(currentUser.requireUserId(), status, request);
         return new ResumeAnalysisDeadLetterPageResponse(
             result.getContent().stream().map(ResumeAnalysisDeadLetterDTO::from).toList(),
             result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()
@@ -80,6 +84,7 @@ public class ResumeAnalysisDeadLetterService {
     }
 
     public ResumeAnalysisDeadLetterDTO replay(Long id) {
+        requireDeadLetter(id);
         boolean claimed = transactionalExecutor.callRequiresNew(
             () -> repository.claimForReplay(id) == 1
         );
@@ -87,7 +92,7 @@ public class ResumeAnalysisDeadLetterService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Dead letter is not pending");
         }
         ResumeAnalysisDeadLetterEntity deadLetter = requireDeadLetter(id);
-        ResumeEntity resume = resumeRepository.findById(deadLetter.getResumeId())
+        ResumeEntity resume = resumeRepository.findByOwnerIdAndId(currentUser.requireUserId(), deadLetter.getResumeId())
             .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND));
         if (resume.getAnalyzeStatus() == AsyncTaskStatus.COMPLETED) {
             deadLetter.setStatus(ResumeAnalysisDeadLetterStatus.RESOLVED);
@@ -111,7 +116,7 @@ public class ResumeAnalysisDeadLetterService {
     }
 
     private ResumeAnalysisDeadLetterEntity requireDeadLetter(Long id) {
-        return repository.findById(id)
+        return repository.findOwnedById(currentUser.requireUserId(), id)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Dead letter not found"));
     }
 }

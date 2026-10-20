@@ -29,7 +29,8 @@ class InterviewEvaluationDeadLetterServiceTest {
             mock(InterviewSessionRepository.class),
             mock(InterviewEvaluationTaskPublisher.class),
             new ObjectMapper(),
-            mock(TransactionalExecutor.class)
+            mock(TransactionalExecutor.class),
+            mock(interview.guide.modules.auth.security.CurrentUserProvider.class)
         );
     UUID id = UUID.randomUUID();
     var message = new InterviewEvaluationMessage(

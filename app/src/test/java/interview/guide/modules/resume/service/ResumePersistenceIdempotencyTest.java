@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.mapper.ResumeMapper;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
@@ -39,7 +41,9 @@ class ResumePersistenceIdempotencyTest {
             analysisRepository,
             new ObjectMapper(),
             resumeMapper,
-            mock(FileHashService.class)
+            mock(FileHashService.class),
+            mock(CurrentUserProvider.class),
+            mock(UserRepository.class)
         );
         resume = new ResumeEntity();
         resume.setId(42L);

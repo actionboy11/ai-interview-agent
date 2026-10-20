@@ -2,6 +2,7 @@ package interview.guide.infrastructure.file;
 
 import interview.guide.common.config.StorageConfigProperties;
 import interview.guide.common.exception.BusinessException;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,8 @@ class FileStorageServiceTest {
         StorageConfigProperties storageConfig = new StorageConfigProperties();
         storageConfig.setEndpoint("http://localhost:9000");
         storageConfig.setBucket("interview-guide");
-        fileStorageService = new FileStorageService(s3Client, storageConfig);
+        fileStorageService = new FileStorageService(s3Client, storageConfig,
+            org.mockito.Mockito.mock(CurrentUserProvider.class));
     }
 
     @Test

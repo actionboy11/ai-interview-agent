@@ -114,7 +114,7 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
             log.warn("简历在分析期间被删除，跳过保存结果: resumeId={}", resumeId);
             return;
         }
-        persistenceService.saveAnalysis(resume, analysis);
+        persistenceService.saveAnalysisInternal(resume, analysis);
     }
 
     @Override

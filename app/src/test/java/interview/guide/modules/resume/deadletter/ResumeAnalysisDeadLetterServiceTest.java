@@ -25,7 +25,8 @@ class ResumeAnalysisDeadLetterServiceTest {
             mock(ResumeRepository.class),
             mock(ResumeAnalysisTaskPublisher.class),
             new ObjectMapper(),
-            mock(TransactionalExecutor.class)
+            mock(TransactionalExecutor.class),
+            mock(interview.guide.modules.auth.security.CurrentUserProvider.class)
         );
         UUID id = UUID.randomUUID();
         ResumeAnalysisMessage message =

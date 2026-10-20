@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.rabbitmq.client.Channel;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
@@ -73,6 +74,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("评估已完成时直接确认重复消息")
   void shouldAckCompletedSession() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
     when(sessionRepository.findBySessionIdWithResume("session-42"))
         .thenReturn(Optional.of(session));
@@ -80,13 +82,14 @@ class InterviewEvaluationRabbitConsumerTest {
     consumer.consume(message("session-42", 0), envelope(8L), channel);
 
     verify(channel).basicAck(8L, false);
-    verify(persistenceService, never()).updateEvaluateStatus(any(), any(), any());
+    verify(persistenceService, never()).updateEvaluateStatusInternal(any(), any(), any());
   }
 
   @Test
   @DisplayName("处理失败后确认重试发布再确认原消息")
   void shouldPublishRetryBeforeAck() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     session.setSessionId("session-42");
     session.setQuestionsJson("not-json");
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -103,6 +106,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("最终失败后发布死信并确认原消息")
   void shouldPublishDeadAfterRetries() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     session.setSessionId("session-42");
     session.setQuestionsJson("not-json");
     when(sessionRepository.findBySessionIdWithResume("session-42"))

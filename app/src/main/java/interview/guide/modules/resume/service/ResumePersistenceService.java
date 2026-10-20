@@ -2,6 +2,8 @@ package interview.guide.modules.resume.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.mapper.ResumeMapper;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
@@ -36,6 +38,8 @@ public class ResumePersistenceService {
     private final ObjectMapper objectMapper;
     private final ResumeMapper resumeMapper;
     private final FileHashService fileHashService;
+    private final CurrentUserProvider currentUser;
+    private final UserRepository userRepository;
     
     /**
      * 检查简历是否已存在（基于文件内容hash）
@@ -44,12 +48,13 @@ public class ResumePersistenceService {
      * @return 如果存在返回已有的简历实体，否则返回空
      */
     public Optional<ResumeEntity> findExistingResume(MultipartFile file) {
+        var ownerId = currentUser.requireUserId();
         try {
             // 计算文件的hash值，用于快速判断是否存在重复简历
             String fileHash = fileHashService.calculateHash(file);
             // 查询数据库中是否已有相同hash的简历
             // spring data jpa 会自动生成查询语句
-            Optional<ResumeEntity> existing = resumeRepository.findByFileHash(fileHash);
+            Optional<ResumeEntity> existing = resumeRepository.findByOwnerIdAndFileHash(ownerId, fileHash);
             //existing,isPresent() 这个方法会返回一个布尔值，表示Optional中是否包含值
             if (existing.isPresent()) {
                 log.info("检测到重复简历: hash={}", fileHash);
@@ -72,10 +77,12 @@ public class ResumePersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public ResumeEntity saveResume(MultipartFile file, String resumeText,
                                    String storageKey, String storageUrl) {
+        var ownerId = currentUser.requireUserId();
         try {
             String fileHash = fileHashService.calculateHash(file);
             
             ResumeEntity resume = new ResumeEntity();
+            resume.setOwner(userRepository.getReferenceById(ownerId));
             resume.setFileHash(fileHash);
             resume.setOriginalFilename(file.getOriginalFilename());
             resume.setFileSize(file.getSize());
@@ -99,6 +106,17 @@ public class ResumePersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ResumeAnalysisEntity saveAnalysis(ResumeEntity resume, ResumeAnalysisResponse analysis) {
+        resume = requireOwnedResume(resume.getId());
+        return persistAnalysis(resume, analysis);
+    }
+
+    /** Internal worker entry point; identity comes exclusively from persisted data. */
+    @Transactional(rollbackFor = Exception.class)
+    public ResumeAnalysisEntity saveAnalysisInternal(ResumeEntity resume, ResumeAnalysisResponse analysis) {
+        return persistAnalysis(requireResume(resume.getId()), analysis);
+    }
+
+    private ResumeAnalysisEntity persistAnalysis(ResumeEntity resume, ResumeAnalysisResponse analysis) {
         try {
             // 使用 MapStruct 映射基础字段
             ResumeAnalysisEntity entity = resumeMapper.toAnalysisEntity(analysis);
@@ -208,6 +226,7 @@ public class ResumePersistenceService {
      * 获取简历的最新评测结果
      */
     public Optional<ResumeAnalysisEntity> getLatestAnalysis(Long resumeId) {
+        requireOwnedResume(resumeId);
         //Optional.ofNullable() 方法用于将可能为 null 的对象包装成 Optional 对象
         return Optional.ofNullable(analysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(resumeId));
     }
@@ -215,6 +234,7 @@ public class ResumePersistenceService {
     /**
      * 获取简历的最新评测结果（返回DTO）
      */
+    @Transactional(readOnly = true)
     public Optional<ResumeAnalysisResponse> getLatestAnalysisAsDTO(Long resumeId) {
         //Optional.map() 方法用于对 Optional 中的值进行转换，如果 Optional 为空，则返回空的 Optional
         //entityToDTO() 方法用于将 ResumeAnalysisEntity 转换为 ResumeAnalysisResponse
@@ -225,13 +245,14 @@ public class ResumePersistenceService {
      * 获取所有简历列表
      */
     public List<ResumeEntity> findAllResumes() {
-        return resumeRepository.findAll();
+        return resumeRepository.findByOwnerIdOrderByUploadedAtDesc(currentUser.requireUserId());
     }
     
     /**
      * 获取简历的所有评测记录
      */
     public List<ResumeAnalysisEntity> findAnalysesByResumeId(Long resumeId) {
+        requireOwnedResume(resumeId);
         return analysisRepository.findByResumeIdOrderByAnalyzedAtDesc(resumeId);
     }
     
@@ -270,7 +291,15 @@ public class ResumePersistenceService {
      * 根据ID获取简历
      */
     public Optional<ResumeEntity> findById(Long id) {
+        return resumeRepository.findByOwnerIdAndId(currentUser.requireUserId(), id);
+    }
+
+    public Optional<ResumeEntity> findByIdInternal(Long id) {
         return resumeRepository.findById(id);
+    }
+
+    private ResumeEntity requireOwnedResume(Long id) {
+        return findById(id).orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND));
     }
     
     /**
@@ -279,7 +308,7 @@ public class ResumePersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteResume(Long id) {
-        Optional<ResumeEntity> resumeOpt = resumeRepository.findById(id);
+        Optional<ResumeEntity> resumeOpt = findById(id);
         if (resumeOpt.isEmpty()) {
             throw new BusinessException(ErrorCode.RESUME_NOT_FOUND);
         }

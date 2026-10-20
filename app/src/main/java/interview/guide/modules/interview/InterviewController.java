@@ -2,6 +2,7 @@ package interview.guide.modules.interview;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.common.exception.BusinessException;
 import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
@@ -168,6 +169,8 @@ public class InterviewController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(pdfBytes);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("导出PDF失败", e);
             return ResponseEntity.internalServerError().build();

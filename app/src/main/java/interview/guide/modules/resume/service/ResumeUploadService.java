@@ -208,7 +208,7 @@ public class ResumeUploadService {
     }
 
     private ResumeReanalyzeSource loadReanalyzeSource(Long resumeId) {
-        ResumeEntity resume = resumeRepository.findById(resumeId)
+        ResumeEntity resume = persistenceService.findById(resumeId)
             .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
         return new ResumeReanalyzeSource(
             resume.getOriginalFilename(),
@@ -222,7 +222,7 @@ public class ResumeUploadService {
         String resumeText,
         boolean shouldCacheResumeText
     ) {
-        ResumeEntity resume = resumeRepository.findById(resumeId)
+        ResumeEntity resume = persistenceService.findById(resumeId)
             .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
 
         if (shouldCacheResumeText || !hasText(resume.getResumeText())) {

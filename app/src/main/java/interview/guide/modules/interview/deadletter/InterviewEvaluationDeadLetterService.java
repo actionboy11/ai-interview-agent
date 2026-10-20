@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationMessage;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
@@ -23,19 +24,22 @@ public class InterviewEvaluationDeadLetterService {
     private final InterviewEvaluationTaskPublisher publisher;
     private final ObjectMapper objectMapper;
     private final TransactionalExecutor transactionalExecutor;
+    private final CurrentUserProvider currentUser;
 
     public InterviewEvaluationDeadLetterService(
         InterviewEvaluationDeadLetterRepository repository,
         InterviewSessionRepository sessionRepository,
         InterviewEvaluationTaskPublisher publisher,
         ObjectMapper objectMapper,
-        TransactionalExecutor transactionalExecutor
+        TransactionalExecutor transactionalExecutor,
+        CurrentUserProvider currentUser
     ) {
         this.repository = repository;
         this.sessionRepository = sessionRepository;
         this.publisher = publisher;
         this.objectMapper = objectMapper;
         this.transactionalExecutor = transactionalExecutor;
+        this.currentUser = currentUser;
     }
 
     @Transactional
@@ -68,7 +72,7 @@ public class InterviewEvaluationDeadLetterService {
             Sort.by(Sort.Direction.DESC, "failedAt")
         );
         Page<InterviewEvaluationDeadLetterEntity> result =
-            status == null ? repository.findAll(request) : repository.findByStatus(status, request);
+            repository.findOwned(currentUser.requireUserId(), status, request);
         return new InterviewEvaluationDeadLetterPageResponse(
             result.getContent().stream().map(InterviewEvaluationDeadLetterDTO::from).toList(),
             result.getNumber(),
@@ -83,6 +87,7 @@ public class InterviewEvaluationDeadLetterService {
     }
 
     public InterviewEvaluationDeadLetterDTO replay(Long id) {
+        requireDeadLetter(id);
         boolean claimed = transactionalExecutor.callRequiresNew(
             () -> repository.claimForReplay(id) == 1
         );
@@ -92,7 +97,7 @@ public class InterviewEvaluationDeadLetterService {
 
         InterviewEvaluationDeadLetterEntity deadLetter = requireDeadLetter(id);
         InterviewSessionEntity session =
-            sessionRepository.findBySessionId(deadLetter.getSessionId()).orElse(null);
+            sessionRepository.findByOwnerIdAndSessionId(currentUser.requireUserId(), deadLetter.getSessionId()).orElse(null);
         if (session == null) {
             restorePending(deadLetter);
             throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
@@ -123,7 +128,7 @@ public class InterviewEvaluationDeadLetterService {
     }
 
     private InterviewEvaluationDeadLetterEntity requireDeadLetter(Long id) {
-        return repository.findById(id)
+        return repository.findOwnedById(currentUser.requireUserId(), id)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Dead letter not found"));
     }
 }

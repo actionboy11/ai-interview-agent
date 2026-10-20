@@ -54,7 +54,7 @@ class ResumeAnalysisRabbitConsumerTest {
         resume.setId(42L);
         resume.setResumeText("resume text");
         ResumeAnalysisResponse response = mock(ResumeAnalysisResponse.class);
-        when(persistenceService.findById(42L)).thenReturn(Optional.of(resume));
+        when(persistenceService.findByIdInternal(42L)).thenReturn(Optional.of(resume));
         when(gradingService.analyzeResume("resume text")).thenReturn(response);
 
         consumer.consume(task, delivery, channel);
@@ -79,7 +79,7 @@ class ResumeAnalysisRabbitConsumerTest {
             java.time.Duration.ofSeconds(10),
             false
         );
-        when(persistenceService.findById(42L)).thenReturn(Optional.of(resume));
+        when(persistenceService.findByIdInternal(42L)).thenReturn(Optional.of(resume));
         when(gradingService.analyzeResume("resume text")).thenThrow(new RuntimeException("AI down"));
         when(retryPolicy.destinationFor(0)).thenReturn(destination);
 
