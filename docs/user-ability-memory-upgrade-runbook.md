@@ -36,8 +36,11 @@ JPA 初始化和 `ApplicationRunner` 之前运行；有旧数据时，V3 会先�
 ## 配置与 SQL 安全
 
 `.env` 中的 `APP_LEGACY_OWNER_USERNAME` 填写普通用户名，不是 UUID 或编码后的文本。
-`app.migration.legacy-owner-username` 接收该配置；`OwnershipMigrationConfiguration`
-复用登录名归一化器，将 UTF-8 字节编码成仅含 `[0-9a-f]` 的
+`OwnershipMigrationConfiguration` 直接从 `systemEnvironment` 原始属性源读取该环境变量，
+不经过 `Environment.getProperty`、Spring Binder 或 application.yml 的占位符解析。
+用户名中的 `${...}`（包括可解析的属性名和默认值表达式）必须保持字面值，不能解析成
+其他账号；不支持用 application.yml、`-D` 或启动参数中的同名属性替代此环境变量。
+自定义器复用登录名归一化器，将 UTF-8 字节编码成仅含 `[0-9a-f]` 的
 `legacy-owner-username` Flyway placeholder。V3 通过 PostgreSQL `decode` 和
 `convert_from` 恢复用户名，再进行普通 SQL 值比较。
 

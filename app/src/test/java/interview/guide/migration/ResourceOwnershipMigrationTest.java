@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import interview.guide.common.config.OwnershipMigrationConfiguration;
-import interview.guide.common.config.OwnershipMigrationProperties;
 import interview.guide.modules.auth.service.UsernameNormalizer;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -16,6 +15,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -166,7 +168,8 @@ class ResourceOwnershipMigrationTest {
 
   @ParameterizedTest
   @ValueSource(strings = {" ＬＥＧＡＣＹ ", " O'Brien ", "${missing}", "$ownership$",
-      "$$; DROP TABLE users;--", "管理员Ａ"})
+      "$$; DROP TABLE users;--", "管理员Ａ", "${review.test.value}",
+      "${review.test.value:default-user}"})
   @DisplayName("应用安全编码后的引号、占位符、dollar quote 和 Unicode 登录名可执行 V3")
   void migratesWithSafelyEncodedConfiguredUsername(String configured) {
     String normalized = switch (configured) {
@@ -178,16 +181,23 @@ class ResourceOwnershipMigrationTest {
     };
     var fixture = legacyDatabase();
     insertUser(fixture.jdbc(), OWNER, normalized);
+    insertUser(fixture.jdbc(), OTHER, "other-user");
     insertRoot(fixture.jdbc(), "resumes", null);
     var configuration = Flyway.configure().dataSource(fixture.url(), POSTGRES.getUsername(),
         POSTGRES.getPassword());
+    var environment = new StandardEnvironment();
+    environment.getPropertySources().replace(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+        new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+            Map.of("APP_LEGACY_OWNER_USERNAME", configured)));
+    environment.getPropertySources().addFirst(new MapPropertySource("resolvable-review-value",
+        Map.of("review.test.value", "other-user")));
     new OwnershipMigrationConfiguration().ownershipMigrationCustomizer(
-        new OwnershipMigrationProperties(configured), new UsernameNormalizer()).customize(configuration);
+        environment, new UsernameNormalizer()).customize(configuration);
 
     assertThat(configuration.load().migrate().migrationsExecuted).isOne();
     assertThat(fixture.jdbc().queryForObject("select owner_user_id from resumes", UUID.class))
         .isEqualTo(OWNER);
-    assertThat(fixture.jdbc().queryForObject("select count(*) from users", Integer.class)).isOne();
+    assertThat(fixture.jdbc().queryForObject("select count(*) from users", Integer.class)).isEqualTo(2);
   }
 
   private Fixture legacyDatabase() {
