@@ -7,6 +7,8 @@ import type { Difficulty } from './components/UnifiedInterviewModal';
 import type { CategoryDTO } from './api/skill';
 import { Loader2 } from 'lucide-react';
 import { ROUTES } from './constants/routes';
+import { AuthProvider } from './hooks/useAuth';
+import ProtectedRoute from './components/ProtectedRoute';
 
 // Lazy load components
 const UploadPage = lazy(() => import('./pages/UploadPage'));
@@ -23,6 +25,9 @@ const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage')
 const InterviewHubPage = lazy(() => import('./pages/InterviewHubPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const InviteRegisterPage = lazy(() => import('./pages/InviteRegisterPage'));
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 
 // Loading component
 const Loading = () => (
@@ -166,9 +171,16 @@ function InterviewWrapper() {
 function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <Suspense fallback={<Loading />}>
         <Routes>
+          <Route path={ROUTES.login} element={<LoginPage />} />
+          <Route path={ROUTES.inviteRegister} element={<InviteRegisterPage />} />
+          <Route element={<ProtectedRoute />}>
           <Route path="/" element={<Layout />}>
+            <Route element={<ProtectedRoute role="ADMIN" />}>
+              <Route path={ROUTES.adminUsers} element={<AdminUsersPage />} />
+            </Route>
             {/* 默认重定向到简历管理页面 */}
             <Route index element={<Navigate to="/history" replace />} />
 
@@ -217,9 +229,11 @@ function App() {
             {/* 问答助手（知识库聊天） */}
             <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
           </Route>
+          </Route>
 
         </Routes>
       </Suspense>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

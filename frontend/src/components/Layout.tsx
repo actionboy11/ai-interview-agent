@@ -1,9 +1,12 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {motion} from 'framer-motion';
-import {Calendar, ChevronRight, Database, FileStack, MessageSquare, Moon, Settings, Sparkles, Sun, Users,} from 'lucide-react';
+import {Calendar, ChevronRight, Database, FileStack, LogOut, MessageSquare, Moon, Settings, ShieldCheck, Sparkles, Sun, Users,} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
+import {useAuth} from '../hooks/useAuth';
+import {ROUTES} from '../constants/routes';
+import {getErrorMessage} from '../api/request';
 
 interface NavItem {
   id: string;
@@ -24,6 +27,21 @@ export default function Layout() {
   const currentPath = location.pathname;
   const {theme, toggleTheme} = useTheme();
   const navigate = useNavigate();
+  const {currentUser, logout} = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutError('');
+    try {
+      await logout();
+      navigate(ROUTES.login, {replace: true});
+    } catch (error) {
+      setLogoutError(getErrorMessage(error));
+    } finally {
+      setLoggingOut(false);
+    }
+  };
   const [interviewModalPreset, setInterviewModalPreset] = useState<{
     defaultMode: 'text' | 'voice';
     defaultResumeId?: number;
@@ -104,6 +122,7 @@ export default function Layout() {
       title: '系统',
       items: [
         { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
+        ...(currentUser?.role === 'ADMIN' ? [{ id: 'admin-users', path: ROUTES.adminUsers, label: '用户管理', icon: ShieldCheck, description: '账号与邀请码' }] : []),
       ],
     },
   ];
@@ -220,6 +239,9 @@ export default function Layout() {
 
         {/* 底部信息 */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-700">
+          <p className="mb-2 truncate px-3 text-sm text-slate-600 dark:text-slate-300" title={currentUser?.username}>{currentUser?.displayName}</p>
+          <button onClick={handleLogout} disabled={loggingOut} className="mb-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"><LogOut className="h-4 w-4" />{loggingOut ? '退出中…' : '退出登录'}</button>
+          {logoutError && <p role="alert" className="mb-3 px-3 text-xs text-red-600">{logoutError}</p>}
           <div className="px-3 py-2 bg-gradient-to-r from-primary-50 to-indigo-50 dark:from-primary-900/30 dark:to-slate-800 rounded-xl">
             <p className="text-xs text-primary-600 dark:text-primary-400 font-medium">AI 面试助手 v1.0</p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Powered by AI</p>

@@ -1,4 +1,4 @@
-import { API_BASE_URL, getErrorMessage, getResultError, parseResultPayload } from './request';
+import { API_BASE_URL, getCsrfHeaders, getErrorMessage, getResultError, parseResultPayload } from './request.ts';
 
 type SseParseMode = 'line' | 'event';
 
@@ -46,8 +46,11 @@ async function createHttpError(response: Response): Promise<Error> {
   const payload = await readResponsePayload(response);
   const result = await parseResultPayload(payload);
   if (result) {
-    return new Error(result.message || `请求失败 (${response.status})`);
+    return getResultError(result) ?? new Error(result.message || `请求失败 (${response.status})`);
   }
+
+  const authError = getResultError({ code: response.status, message: `请求失败 (${response.status})`, data: null });
+  if (response.status === 401) return authError!;
 
   if (typeof payload === 'string' && payload.trim()) {
     return new Error(payload.trim());
@@ -270,7 +273,11 @@ async function readStream(response: Response, options: StreamSseOptions): Promis
 
 export async function streamSse(options: StreamSseOptions): Promise<void> {
   try {
-    const response = await fetch(toApiUrl(options.url), options.init);
+    const headers = new Headers(options.init.headers);
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(options.init.method?.toUpperCase() ?? 'GET')) {
+      for (const [name, value] of Object.entries(await getCsrfHeaders())) headers.set(name, value);
+    }
+    const response = await fetch(toApiUrl(options.url), { ...options.init, headers, credentials: 'include' });
     await assertStreamResponse(response);
     await readStream(response, options);
     options.onComplete();

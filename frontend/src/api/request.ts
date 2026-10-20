@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -18,12 +18,63 @@ export interface Result<T = unknown> {
 const SUCCESS_CODE = 200;
 const RESULT_BLOB_PARSE_LIMIT = 64 * 1024;
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+export const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? '';
 
 const instance: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,
+  withCredentials: true,
 });
+
+type CsrfToken = { headerName: string; token: string };
+let csrfToken: CsrfToken | null = null;
+let csrfPending: Promise<CsrfToken> | null = null;
+let csrfRevision = 0;
+const authFailureListeners = new Set<() => void>();
+
+export function subscribeAuthFailure(listener: () => void): () => void {
+  authFailureListeners.add(listener);
+  return () => { authFailureListeners.delete(listener); };
+}
+
+export function clearCsrfToken(): void {
+  csrfRevision += 1;
+  csrfToken = null;
+  csrfPending = null;
+}
+
+export async function getCsrfHeaders(): Promise<Record<string, string>> {
+  if (!csrfToken) {
+    const revision = csrfRevision;
+    csrfPending ??= instance.get<CsrfToken>('/api/auth/csrf').then(response => response.data);
+    const pending = csrfPending;
+    try {
+      const token = await pending;
+      if (revision !== csrfRevision) return getCsrfHeaders();
+      csrfToken = token;
+      return { [token.headerName]: token.token };
+    } finally {
+      if (csrfPending === pending) csrfPending = null;
+    }
+  }
+  return { [csrfToken.headerName]: csrfToken.token };
+}
+
+instance.interceptors.request.use(async config => {
+  config.withCredentials = true;
+  if (!['get', 'head', 'options'].includes(config.method?.toLowerCase() ?? 'get')) {
+    const headers = await getCsrfHeaders();
+    for (const [name, value] of Object.entries(headers)) config.headers.set(name, value);
+  }
+  return config;
+});
+
+function notifyAuthFailure(code: number): void {
+  if (code === 401 || code === 12002) {
+    clearCsrfToken();
+    authFailureListeners.forEach(listener => listener());
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -39,6 +90,7 @@ export function getResultError(value: unknown): Error | null {
   if (!isResult(value) || value.code === SUCCESS_CODE) {
     return null;
   }
+  notifyAuthFailure(value.code);
   return new Error(value.message || '请求失败');
 }
 
@@ -86,7 +138,7 @@ export async function resolveBlobDownload(blob: Blob): Promise<Blob> {
   }
 
   if (result.code !== SUCCESS_CODE) {
-    throw new Error(result.message || '文件下载失败');
+    throw getResultError(result)!;
   }
 
   throw new Error(result.message && result.message !== 'success'
@@ -100,6 +152,7 @@ async function getErrorFromResponseData(data: unknown): Promise<Error | null> {
     return null;
   }
 
+  notifyAuthFailure(result.code);
   return new Error(result.message || '请求失败');
 }
 
@@ -126,15 +179,18 @@ instance.interceptors.response.use(
         return response;
       }
       // 失败：直接抛出 message
-      return Promise.reject(new Error(result.message || '请求失败'));
+      return Promise.reject(getResultError(result));
     }
     
     // 非 Result 格式，直接返回
     return response;
   },
   async (error) => {
+    // 保留 CSRF 初始化等请求拦截器已解析的业务错误。
+    if (!axios.isAxiosError(error)) return Promise.reject(error);
     // 有响应的情况：后端返回了结果（即使是错误）
     if (error.response) {
+      notifyAuthFailure(error.response.status);
       const { data } = error.response;
       // 尝试解析 Result 格式
       const responseError = await getErrorFromResponseData(data);
