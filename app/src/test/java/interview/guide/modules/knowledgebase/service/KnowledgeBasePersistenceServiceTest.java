@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import java.util.Optional;
@@ -18,7 +19,8 @@ class KnowledgeBasePersistenceServiceTest {
 
   private final KnowledgeBaseRepository repository = mock(KnowledgeBaseRepository.class);
   private final KnowledgeBasePersistenceService service =
-      new KnowledgeBasePersistenceService(repository, mock(CurrentUserProvider.class));
+      new KnowledgeBasePersistenceService(repository, mock(CurrentUserProvider.class),
+          mock(UserRepository.class));
 
   @Test
   @DisplayName("首次完成向量化时记录消息标识和分块数")

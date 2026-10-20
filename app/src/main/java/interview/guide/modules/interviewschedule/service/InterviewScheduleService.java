@@ -2,7 +2,7 @@ package interview.guide.modules.interviewschedule.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
-import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interviewschedule.model.CreateInterviewRequest;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleDTO;
@@ -24,6 +24,7 @@ public class InterviewScheduleService {
 
     private final InterviewScheduleRepository repository;
     private final CurrentUserProvider currentUser;
+    private final UserRepository userRepository;
 
     private static final String[] COPYABLE_FIELDS = {
         "companyName", "position", "interviewTime", "interviewType",
@@ -34,9 +35,7 @@ public class InterviewScheduleService {
     public InterviewScheduleDTO create(CreateInterviewRequest request) {
         InterviewScheduleEntity entity = new InterviewScheduleEntity();
         BeanUtils.copyProperties(request, entity);
-        UserEntity owner = new UserEntity();
-        owner.setId(currentUser.requireUserId());
-        entity.setOwner(owner);
+        entity.setOwner(userRepository.getReferenceById(currentUser.requireUserId()));
         entity.setStatus(InterviewStatus.PENDING);
 
         return toDTO(repository.save(entity));

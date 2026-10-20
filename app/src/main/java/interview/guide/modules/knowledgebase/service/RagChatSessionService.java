@@ -2,7 +2,7 @@ package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
-import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.infrastructure.mapper.KnowledgeBaseMapper;
 import interview.guide.infrastructure.mapper.RagChatMapper;
@@ -48,6 +48,7 @@ public class RagChatSessionService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseQueryProperties queryProperties;
     private final CurrentUserProvider currentUser;
+    private final UserRepository userRepository;
 
     /**
      * 创建新会话
@@ -64,9 +65,7 @@ public class RagChatSessionService {
 
         // 创建会话
         RagChatSessionEntity session = new RagChatSessionEntity();
-        UserEntity owner = new UserEntity();
-        owner.setId(currentUser.requireUserId());
-        session.setOwner(owner);
+        session.setOwner(userRepository.getReferenceById(currentUser.requireUserId()));
         session.setTitle(request.title() != null && !request.title().isBlank()
             ? request.title()
             : generateTitle(knowledgeBases));

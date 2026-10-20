@@ -8,6 +8,7 @@ import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.messaging.VoiceEvaluationTaskPublisher;
@@ -39,7 +40,8 @@ class VoiceInterviewServiceMessagingTest {
             publisher,
             mock(LlmProviderRegistry.class),
             mock(CurrentUserProvider.class),
-            mock(ResumeRepository.class)
+            mock(ResumeRepository.class),
+            mock(UserRepository.class)
         );
 
         service.triggerEvaluation(42L);
@@ -83,7 +85,8 @@ class VoiceInterviewServiceMessagingTest {
             publisher,
             mock(LlmProviderRegistry.class),
             mock(CurrentUserProvider.class),
-            mock(ResumeRepository.class)
+            mock(ResumeRepository.class),
+            mock(UserRepository.class)
         );
     }
 }

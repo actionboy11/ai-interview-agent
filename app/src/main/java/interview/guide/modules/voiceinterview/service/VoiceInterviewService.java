@@ -6,6 +6,8 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.model.UserStatus;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
@@ -60,6 +62,7 @@ public class VoiceInterviewService {
     private final LlmProviderRegistry llmProviderRegistry;
     private final CurrentUserProvider currentUser;
     private final ResumeRepository resumeRepository;
+    private final UserRepository userRepository;
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
     private static final int CACHE_TTL_HOURS = 1;
@@ -78,8 +81,7 @@ public class VoiceInterviewService {
             && resumeRepository.findByOwnerIdAndId(ownerId, request.getResumeId()).isEmpty()) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历不存在");
         }
-        UserEntity owner = new UserEntity();
-        owner.setId(ownerId);
+        UserEntity owner = userRepository.getReferenceById(ownerId);
         String effectiveSkillId = request.getSkillId() != null ? request.getSkillId() : InterviewDefaults.SKILL_ID;
         String effectiveLlmProvider = (request.getLlmProvider() != null && !request.getLlmProvider().isBlank())
             ? request.getLlmProvider()
@@ -203,9 +205,13 @@ public class VoiceInterviewService {
     }
 
     public VoiceInterviewSessionEntity requireSessionOwner(Long sessionId, UUID ownerId) {
-        return sessionRepository.findByOwnerIdAndId(ownerId, sessionId)
+        VoiceInterviewSessionEntity session = sessionRepository.findByOwnerIdAndId(ownerId, sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
                 "会话不存在: " + sessionId));
+        if (session.getOwner().getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已禁用");
+        }
+        return session;
     }
 
     /**

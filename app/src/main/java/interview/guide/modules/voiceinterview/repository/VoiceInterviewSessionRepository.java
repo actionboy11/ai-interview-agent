@@ -4,6 +4,7 @@ import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity.InterviewPhase;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -17,6 +18,11 @@ import java.util.UUID;
 @Repository
 public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInterviewSessionEntity, Long> {
 
+  @Override
+  @EntityGraph(attributePaths = "owner")
+  Optional<VoiceInterviewSessionEntity> findById(Long id);
+
+  @EntityGraph(attributePaths = "owner")
   Optional<VoiceInterviewSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
   List<VoiceInterviewSessionEntity> findByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);

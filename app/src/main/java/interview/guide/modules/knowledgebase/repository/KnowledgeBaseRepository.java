@@ -3,6 +3,7 @@ package interview.guide.modules.knowledgebase.repository;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +18,10 @@ import java.util.UUID;
  */
 @Repository
 public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEntity, Long> {
+
+  @Override
+  @EntityGraph(attributePaths = "owner")
+  Optional<KnowledgeBaseEntity> findById(Long id);
 
   Optional<KnowledgeBaseEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
