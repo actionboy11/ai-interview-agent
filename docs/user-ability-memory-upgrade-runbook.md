@@ -8,13 +8,19 @@ V3 为简历、文字面试、语音面试、知识库、RAG 会话和面试日�
 
 1. **先部署 Tasks 1–4 的版本（仅包含 V1/V2，无 V3）。** 已有 Hibernate 库会在
    V1 建立 Flyway baseline，然后应用 V2 身份表。此版本包含 `InitialAdminBootstrap`。
+   使用生产 Compose 时，先将本次 `app.environment` 中的四个 `APP_AUTH_BOOTSTRAP_*` /
+   `APP_LEGACY_OWNER_USERNAME` 映射同步到阶段一部署配置；不要提前复制 V3 或使用新版应用。
 2. 设置完整的 `APP_AUTH_BOOTSTRAP_USERNAME`、`APP_AUTH_BOOTSTRAP_PASSWORD` 和
    `APP_AUTH_BOOTSTRAP_DISPLAY_NAME`，启动阶段一版本，等待 bootstrap 成功提交。
    将 `APP_LEGACY_OWNER_USERNAME` 设为这个账号的用户名。已有管理员账号也可复用；
    bootstrap 不会重置其密码。同名普通用户不能作为 bootstrap 管理员复用。
+   若目标用户名包含 `${...}`，不要假设旧 bootstrap 属性绑定也会保留字面表达式：
+   先 bootstrap 普通名称的管理员，再用现有管理员创建用户接口以 JSON 字面用户名创建
+   并核对目标账号；随后清空全部三项 bootstrap 配置，再执行旧所有者预检。
 3. 确认账号存在且用户名正确。归一化规则与登录一致：NFKC、去除首尾空白、
    ROOT 小写、再次 NFKC；规范化登录名必须匹配唯一一条 `users` 记录。
    保留账号 ID 与六个根表记录数用于升级后核对，不输出密码或环境文件。
+   **生产停机前必须完成下方 Compose 字面值预检；失败时先修正配置，不能继续停机升级。**
 4. 停止业务写入，停止旧应用及后台任务，备份 PostgreSQL（含 Flyway 历史、身份表和
    业务数据），验证备份可恢复。应保留阶段一制品与配置。
 5. **再部署包含 V3 的完整归属功能版本**，保留 `APP_LEGACY_OWNER_USERNAME`。
@@ -27,6 +33,55 @@ V3 为简历、文字面试、语音面试、知识库、RAG 会话和面试日�
 JPA 初始化和 `ApplicationRunner` 之前运行；有旧数据时，V3 会先失败，bootstrap
 没有机会执行。不要临时关闭外键/非空约束来绕过升级门槛。
 
+## Compose 配置与停机前预检
+
+生产命令与 `docs/deployment.md` 一致，显式使用 `.env.production`：项目目录的 `.env`
+不会自动把变量注入容器。`docker-compose.prod.yml` 已明确映射旧所有者与三个 bootstrap
+变量；四项均无默认账号或密码。阶段一 bootstrap 成功后可清空 bootstrap 配置，
+但非空旧库升级必须保留 `APP_LEGACY_OWNER_USERNAME`。
+
+生产计划使用 Docker Compose 5。`.env.production` 的用户名值必须用单引号包裹，
+不要用未引用或双引号值，也不要 `source`/`eval` 环境文件。例如字面用户名
+`${REVIEW_TEST_VALUE:default-user}` 写成：
+
+```dotenv
+APP_LEGACY_OWNER_USERNAME='${REVIEW_TEST_VALUE:default-user}'
+```
+
+含单引号的用户名 `O'Brien` 写成 `APP_LEGACY_OWNER_USERNAME='O\'Brien'`。这些是互斥示例，
+只填写实际账号的一项；不要自行把 `$` 加倍。Compose 的单引号 dotenv 值不会执行插值，
+其中的单引号使用反斜杠转义；这是 Docker 官方的
+[dotenv 规则](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)。
+应用仍会做登录名归一化，但 `${...}` 的内容不得替换成其他属性或默认账号。
+
+在生产仓库目录、旧服务仍运行时执行以下预检。脚本会提示输入人工核对过的原始用户名
+（不是密码，输入不回显），不经 shell 求值，可包含 `$`、引号和 Unicode。脚本与下面的
+Bash 包装函数都排除当前 shell 的四个同名变量覆盖；预检和后续部署必须使用同一个
+`.env.production` 与 Compose 文件。Python 3 脚本只运行只读的 Compose 配置解析，
+不创建容器、不运行 Flyway、不停止服务，也不输出用户名、密码、完整 JSON 或其他环境。
+
+```bash
+python3 deploy/verify-legacy-owner-environment.py --env-file .env.production
+# Only continue after exit code 0.
+production_compose() {
+  env -u APP_LEGACY_OWNER_USERNAME -u APP_AUTH_BOOTSTRAP_USERNAME \
+    -u APP_AUTH_BOOTSTRAP_PASSWORD -u APP_AUTH_BOOTSTRAP_DISPLAY_NAME \
+    docker compose --env-file .env.production -f docker-compose.prod.yml "$@"
+}
+```
+
+Compose 5 的 `config --format json` 为了能再次序列化会把输出中的每个 `$` 加倍，
+这是[已核对的上游实现](https://github.com/docker/compose/blob/v5.1.4/cmd/compose/config.go#L178-L180)。
+预检只撤销这一次输出转义，再逐字比较容器模型中的用户名；它不会展开 `${...}`，
+也不会修改环境文件。实际部署直接使用原 Compose 文件，不能把渲染 JSON 当作新配置。
+脚本要求 Compose 5；更新 Compose 后应先运行配置回归测试再升级生产。
+
+只有预检退出码为 0 才能进入停写与备份步骤。若 bootstrap 用户名仍非空，预检还要求它与
+目标原始用户名一致；已清空时只核对旧数据所有者。变更文件、shell、Compose 版本或账号后
+重新预检。之后按上述阶段二门槛，使用 `production_compose build app`、
+`production_compose build frontend` 和 `production_compose up -d`，不要改回另一套参数。
+不要把 `config --format json` 的完整输出显示到终端或保存到未受保护文件。
+
 ## 全新数据库
 
 无旧业务根记录的空库可一次应用 V1、V2、V3，不要求提前存在账号，
@@ -35,7 +90,8 @@ JPA 初始化和 `ApplicationRunner` 之前运行；有旧数据时，V3 会先�
 
 ## 配置与 SQL 安全
 
-`.env` 中的 `APP_LEGACY_OWNER_USERNAME` 填写普通用户名，不是 UUID 或编码后的文本。
+`APP_LEGACY_OWNER_USERNAME` 填写普通用户名，不是 UUID 或编码后的文本。生产使用上面的
+单引号 `.env.production` 配置；本地 `bootRun` 从 `.env` 注入进程环境。
 `OwnershipMigrationConfiguration` 直接从 `systemEnvironment` 原始属性源读取该环境变量，
 不经过 `Environment.getProperty`、Spring Binder 或 application.yml 的占位符解析。
 用户名中的 `${...}`（包括可解析的属性名和默认值表达式）必须保持字面值，不能解析成
