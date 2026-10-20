@@ -13,6 +13,7 @@ import interview.guide.modules.resume.repository.ResumeAnalysisRepository;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +22,6 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 
@@ -41,6 +41,7 @@ public class ResumePersistenceService {
     private final FileHashService fileHashService;
     private final CurrentUserProvider currentUser;
     private final UserRepository userRepository;
+    private static final String OWNER_HASH_CONSTRAINT = "uk_resume_owner_hash";
     
     /**
      * 检查简历是否已存在（基于文件内容hash）
@@ -88,17 +89,39 @@ public class ResumePersistenceService {
             
             return saved;
         } catch (DataIntegrityViolationException e) {
-            if (e.getMostSpecificCause() instanceof SQLException sqlException
-                && "23505".equals(sqlException.getSQLState())) {
+            ConstraintViolationException violation = findConstraintViolation(e);
+            String constraintName = violation == null ? "unknown"
+                : normalizeConstraintName(violation.getConstraintName());
+            if (violation != null && "23505".equals(violation.getSQLState())
+                && OWNER_HASH_CONSTRAINT.equalsIgnoreCase(constraintName)) {
                 log.info("重复简历上传: ownerId={}", ownerId);
                 throw new BusinessException(ErrorCode.RESUME_DUPLICATE, "简历已存在");
             }
-            log.error("保存简历违反数据库约束: ownerId={}", ownerId, e);
+            log.error("保存简历违反数据库约束: ownerId={}, sqlState={}, constraint={}",
+                ownerId, violation == null ? "unknown" : violation.getSQLState(), constraintName);
             throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败");
         } catch (Exception e) {
             log.error("保存简历失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败");
         }
+    }
+
+    private ConstraintViolationException findConstraintViolation(DataIntegrityViolationException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation) {
+                return violation;
+            }
+        }
+        return null;
+    }
+
+    private String normalizeConstraintName(String name) {
+        if (name == null) {
+            return "unknown";
+        }
+        String firstToken = name.split("\\s+", 2)[0];
+        int lastDot = firstToken.lastIndexOf('.');
+        return firstToken.substring(lastDot + 1).replace("\"", "");
     }
     
     /**
