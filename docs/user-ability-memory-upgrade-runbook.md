@@ -15,8 +15,8 @@ V3 为简历、文字面试、语音面试、知识库、RAG 会话和面试日�
    将 `APP_LEGACY_OWNER_USERNAME` 设为这个账号的用户名。已有管理员账号也可复用；
    bootstrap 不会重置其密码。同名普通用户不能作为 bootstrap 管理员复用。
    若目标用户名包含 `${...}`，不要假设旧 bootstrap 属性绑定也会保留字面表达式：
-   先 bootstrap 普通名称的管理员，再用现有管理员创建用户接口以 JSON 字面用户名创建
-   并核对目标账号；随后清空全部三项 bootstrap 配置，再执行旧所有者预检。
+   按下方「通过 API 创建字面用户名」流程，先 bootstrap 普通名称的管理员，再创建并核对
+   目标账号；随后清空全部三项 bootstrap 配置，再执行旧所有者预检。
 3. 确认账号存在且用户名正确。归一化规则与登录一致：NFKC、去除首尾空白、
    ROOT 小写、再次 NFKC；规范化登录名必须匹配唯一一条 `users` 记录。
    保留账号 ID 与六个根表记录数用于升级后核对，不输出密码或环境文件。
@@ -32,6 +32,128 @@ V3 为简历、文字面试、语音面试、知识库、RAG 会话和面试日�
 不能在同一次首次部署中依赖 `InitialAdminBootstrap` 为 V3 创建账号：Flyway 在
 JPA 初始化和 `ApplicationRunner` 之前运行；有旧数据时，V3 会先失败，bootstrap
 没有机会执行。不要临时关闭外键/非空约束来绕过升级门槛。
+
+## 通过 API 创建字面用户名（阶段一仍运行时）
+
+以下 Bash/Python 3 示例使用当前 Task 4 接口。生产入口还有 Caddy Basic Auth，故分别
+询问网关凭据与应用 ADMIN 凭据；密码均隐藏输入，不放入命令行或环境变量。用户名、显示名
+请不含首尾空白；`${...}`、引号、dollar 和 Unicode 可直接输入。引号 heredoc 阻止 shell
+展开，JSON 由 `json.dumps` 构造；私有临时目录保存 cookie jar 与请求体，退出时 trap 清理。
+每次 POST 前都 GET `/api/auth/csrf`，取返回的 `headerName`/`token` 并同时发送 cookie。
+所有响应都检查 HTTP 成功及 `Result.code == 200`，不能只看 HTTP 200。
+
+```bash
+(
+set -eu
+set +x
+umask 077
+auth_dir=$(mktemp -d)
+trap 'rm -f -- "$auth_dir"/*.json "$auth_dir"/*.cookies; rmdir -- "$auth_dir"' EXIT
+python3 - "$auth_dir" <<'PY'
+import getpass, http.cookiejar, json, sys, uuid, warnings
+from pathlib import Path
+from urllib import error, parse, request
+
+private_dir = Path(sys.argv[1])
+warnings.simplefilter("error", getpass.GetPassWarning)  # Abort rather than echo without a TTY.
+ask = getpass.getpass  # Also works through /dev/tty while this program uses a heredoc.
+base = ask("HTTPS site origin (without /api): ").rstrip("/")
+origin = parse.urlsplit(base)
+if origin.scheme != "https" or not origin.netloc or origin.path or origin.query or origin.fragment or origin.username:
+    raise SystemExit("use the trusted HTTPS site origin without credentials or a path")
+gateway = request.HTTPPasswordMgrWithDefaultRealm()
+gateway.add_password(None, base, ask("Caddy username: "), ask("Caddy password: "))
+
+def client(label):
+    jar = http.cookiejar.MozillaCookieJar(str(private_dir / (label + ".cookies")))
+    return request.build_opener(request.HTTPCookieProcessor(jar), request.HTTPBasicAuthHandler(gateway)), jar
+
+def body_file(payload):
+    path = private_dir / "request.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+def call(browser, method, path, payload=None):
+    opener, jar = browser
+    headers, data = {"Accept": "application/json"}, None
+    if method == "POST":
+        csrf = call(browser, "GET", "/api/auth/csrf")
+        headers.update({"Content-Type": "application/json", csrf["headerName"]: csrf["token"]})
+        data = body_file(payload).read_bytes()
+    try:
+        with opener.open(request.Request(base + path, data=data, headers=headers, method=method), timeout=30) as response:
+            result = json.load(response)
+    except (error.URLError, ValueError):
+        raise SystemExit("HTTP/JSON request failed; do not continue the upgrade") from None
+    jar.save(ignore_discard=True, ignore_expires=True)
+    if not isinstance(result, dict) or result.get("code") != 200:
+        raise SystemExit("Result was not successful; stop and inspect the account state")
+    return result.get("data")
+
+admin_browser = client("admin")
+admin_name = ask("Bootstrap ADMIN username: ")
+admin_password = ask("Bootstrap ADMIN password: ")
+admin = call(admin_browser, "POST", "/api/auth/login", {
+    "username": admin_name, "password": admin_password})
+if not isinstance(admin, dict) or admin.get("role") != "ADMIN":
+    raise SystemExit("an application ADMIN is required")
+admin_id = admin["id"]
+call(admin_browser, "GET", "/api/auth/csrf")  # Login invalidates the previous token.
+if admin["mustChangePassword"]:
+    call(admin_browser, "POST", "/api/auth/change-password", {
+        "currentPassword": admin_password, "newPassword": ask("New permanent ADMIN password: ")})
+    admin = call(admin_browser, "GET", "/api/auth/me")
+    if admin["id"] != admin_id or admin["role"] != "ADMIN" or admin["mustChangePassword"]:
+        raise SystemExit("ADMIN password-change verification failed")
+
+owner_name = ask("Literal legacy-owner username: ")
+display_name = ask("Owner displayName: ")
+role = ask("Owner role [USER; use ADMIN only if intended]: ").strip().upper() or "USER"
+if not owner_name or owner_name != owner_name.strip() or not display_name or display_name != display_name.strip() or role not in ("USER", "ADMIN"):
+    raise SystemExit("invalid username/displayName/role input")
+owner_password = ask("New owner temporary password (nonblank, at most 72 UTF-8 bytes): ")
+created = call(admin_browser, "POST", "/api/admin/users", {
+    "username": owner_name, "password": owner_password, "displayName": display_name, "role": role})
+uuid.UUID(created["id"])
+if created.get("status") != "ACTIVE" or created.get("mustChangePassword") is not True:
+    raise SystemExit("unexpected newly-created account state")
+owner_browser = client("owner")  # A separate cookie jar preserves the ADMIN session.
+logged_in = call(owner_browser, "POST", "/api/auth/login", {
+    "username": owner_name, "password": owner_password})
+call(owner_browser, "GET", "/api/auth/csrf")
+current = call(owner_browser, "GET", "/api/auth/me")
+for identity in (created, logged_in, current):
+    if identity["id"] != created["id"] or identity["username"] != owner_name or identity["displayName"] != display_name or identity["role"] != role:
+        raise SystemExit("created/login/me identity mismatch; stop the upgrade")
+call(owner_browser, "POST", "/api/auth/logout", {})
+call(admin_browser, "POST", "/api/auth/logout", {})
+print(json.dumps({key: created[key] for key in ("id", "username", "displayName", "role")}, ensure_ascii=False))
+PY
+)
+```
+
+`CurrentUserResponse`/`AdminUserResponse` 不返回 `normalizedUsername`；`username` 是保存的
+显示拼写。上面的目标账号登录会调用服务器 `UsernameNormalizer`，随后核对创建、登录和
+`/me` 的同一 UUID，验证归一化查找确实命中该账号，而非假造响应字段。保存成功输出的
+非秘密 UUID/用户名/显示名/角色，并核对实际意图；失败时不要继续迁移或盲目重复创建。
+
+bootstrap 创建的账号通常 `mustChangePassword=true`，所以示例实际调用
+`POST /api/auth/change-password`（`currentPassword`、`newPassword`），再 GET `/api/auth/me`
+确认标记清除；已改过密码且标记为 false 时跳过。当前后端不以此标记阻挡 admin API，
+前端会要求改密。新目标账号的临时密码标记不妨碍 V3 归属；用户后续登录前端仍需改密。
+V3 只要求匹配的现有用户，`USER` 足够；不要仅为旧数据归属授予 `ADMIN`。
+
+在 `.env.production` 中按 Compose 单引号规则填写已核对的 `APP_LEGACY_OWNER_USERNAME`，
+用编辑器清空**全部三项** bootstrap 配置（不要打印旧密码行）：
+
+```dotenv
+APP_AUTH_BOOTSTRAP_USERNAME=''
+APP_AUTH_BOOTSTRAP_PASSWORD=''
+APP_AUTH_BOOTSTRAP_DISPLAY_NAME=''
+```
+
+随后执行下方现有 `verify-legacy-owner-environment.py`，输入同一原始字面用户名；只有
+预检退出码为 0 才能停写、备份和部署。用户名或身份不一致时停止，先核对账号和配置。
 
 ## Compose 配置与停机前预检
 
