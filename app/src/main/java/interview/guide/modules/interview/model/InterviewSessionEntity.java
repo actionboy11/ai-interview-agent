@@ -1,8 +1,24 @@
 package interview.guide.modules.interview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.resume.model.ResumeEntity;
-import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -13,11 +29,26 @@ import java.util.List;
  */
 @Entity
 @Table(name = "interview_sessions", indexes = {
+    @Index(name = "idx_interview_owner_created", columnList = "owner_user_id,created_at"),
+    @Index(name = "idx_interview_owner_session", columnList = "owner_user_id,session_id"),
     @Index(name = "idx_interview_session_resume_created", columnList = "resume_id,created_at"),
     @Index(name = "idx_interview_session_resume_status_created", columnList = "resume_id,status,created_at"),
     @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt")
 })
 public class InterviewSessionEntity {
+
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(name = "owner_user_id", nullable = false,
+      foreignKey = @ForeignKey(name = "fk_interview_owner"))
+  private UserEntity owner;
+
+  public UserEntity getOwner() {
+    return owner;
+  }
+
+  public void setOwner(UserEntity owner) {
+    this.owner = owner;
+  }
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

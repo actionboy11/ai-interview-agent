@@ -1,6 +1,27 @@
 package interview.guide.modules.knowledgebase.model;
 
-import jakarta.persistence.*;
+import interview.guide.modules.auth.model.UserEntity;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -17,12 +38,18 @@ import java.util.Set;
  */
 @Entity
 @Table(name = "rag_chat_sessions", indexes = {
+    @Index(name = "idx_rag_owner_pinned_updated", columnList = "owner_user_id,is_pinned,updated_at"),
     @Index(name = "idx_rag_session_updated", columnList = "updatedAt")
 })
 @Getter
 @Setter
 @NoArgsConstructor
 public class RagChatSessionEntity {
+
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(name = "owner_user_id", nullable = false,
+      foreignKey = @ForeignKey(name = "fk_rag_owner"))
+  private UserEntity owner;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

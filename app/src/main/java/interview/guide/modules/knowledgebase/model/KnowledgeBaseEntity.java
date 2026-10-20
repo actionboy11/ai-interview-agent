@@ -1,6 +1,21 @@
 package interview.guide.modules.knowledgebase.model;
 
-import jakarta.persistence.*;
+import interview.guide.modules.auth.model.UserEntity;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 
@@ -9,17 +24,31 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "knowledge_bases", indexes = {
-    @Index(name = "idx_kb_hash", columnList = "fileHash", unique = true),
+    @Index(name = "idx_kb_owner_uploaded", columnList = "owner_user_id,uploaded_at"),
     @Index(name = "idx_kb_category", columnList = "category")
-})
+}, uniqueConstraints = @UniqueConstraint(name = "uk_kb_owner_hash",
+    columnNames = {"owner_user_id", "file_hash"}))
 public class KnowledgeBaseEntity {
+
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(name = "owner_user_id", nullable = false,
+      foreignKey = @ForeignKey(name = "fk_kb_owner"))
+  private UserEntity owner;
+
+  public UserEntity getOwner() {
+    return owner;
+  }
+
+  public void setOwner(UserEntity owner) {
+    this.owner = owner;
+  }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     // 文件内容的SHA-256哈希值，用于去重
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(nullable = false, length = 64)
     private String fileHash;
 
     // 知识库名称（用户自定义或从文件名提取）

@@ -112,6 +112,9 @@ spring:
 
 # Application custom configuration
 app:
+  migration:
+    # Encoded by OwnershipMigrationConfiguration before becoming a Flyway placeholder.
+    legacy-owner-username: ${APP_LEGACY_OWNER_USERNAME:}
   auth:
     bootstrap:
       username: ${APP_AUTH_BOOTSTRAP_USERNAME:}

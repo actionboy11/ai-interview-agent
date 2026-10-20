@@ -9,12 +9,17 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** 
  * RAG聊天会话Repository
  */
 @Repository
 public interface RagChatSessionRepository extends JpaRepository<RagChatSessionEntity, Long> {
+
+  Optional<RagChatSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
+
+  List<RagChatSessionEntity> findByOwnerIdOrderByIsPinnedDescUpdatedAtDesc(UUID ownerId);
 
     /**
      * 按更新时间倒序获取所有活跃会话

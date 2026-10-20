@@ -10,12 +10,21 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 知识库Repository
  */
 @Repository
 public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEntity, Long> {
+
+  Optional<KnowledgeBaseEntity> findByOwnerIdAndId(UUID ownerId, Long id);
+
+  List<KnowledgeBaseEntity> findByOwnerIdOrderByUploadedAtDesc(UUID ownerId);
+
+  Optional<KnowledgeBaseEntity> findByOwnerIdAndFileHash(UUID ownerId, String fileHash);
+
+  boolean existsByOwnerIdAndFileHash(UUID ownerId, String fileHash);
 
     /**
      * 根据文件哈希查找知识库（用于去重）

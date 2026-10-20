@@ -11,12 +11,19 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 面试会话Repository
  */
 @Repository
 public interface InterviewSessionRepository extends JpaRepository<InterviewSessionEntity, Long> {
+
+  Optional<InterviewSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
+
+  List<InterviewSessionEntity> findByOwnerIdOrderByCreatedAtDesc(UUID ownerId);
+
+  Optional<InterviewSessionEntity> findByOwnerIdAndSessionId(UUID ownerId, String sessionId);
 
     /**
      * 根据会话ID查找

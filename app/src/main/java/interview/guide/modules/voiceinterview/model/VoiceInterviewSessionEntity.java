@@ -1,22 +1,48 @@
 package interview.guide.modules.voiceinterview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
-import jakarta.persistence.*;
+import interview.guide.modules.auth.model.UserEntity;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Builder.Default;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "voice_interview_sessions")
+@Table(name = "voice_interview_sessions", indexes = {
+    @Index(name = "idx_voice_owner_updated", columnList = "owner_user_id,updated_at")
+})
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class VoiceInterviewSessionEntity {
+
+  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @JoinColumn(name = "owner_user_id", nullable = false,
+      foreignKey = @ForeignKey(name = "fk_voice_owner"))
+  @ToString.Exclude
+  @EqualsAndHashCode.Exclude
+  private UserEntity owner;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

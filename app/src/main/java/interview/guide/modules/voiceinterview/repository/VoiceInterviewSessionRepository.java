@@ -9,12 +9,17 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 语音面试会话Repository
  */
 @Repository
 public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInterviewSessionEntity, Long> {
+
+  Optional<VoiceInterviewSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
+
+  List<VoiceInterviewSessionEntity> findByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
     /**
      * 根据用户ID查找所有会话，按开始时间倒序
