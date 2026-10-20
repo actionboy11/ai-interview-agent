@@ -76,6 +76,7 @@ public class SecurityConfiguration {
             .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health",
                 "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
             .requestMatchers("/api/admin/**").hasRole("ADMIN")
+            .requestMatchers("/api/llm-provider", "/api/llm-provider/**").hasRole("ADMIN")
             .anyRequest().authenticated())
         .addFilterAfter(new ActiveUserFilter(currentUsers, entryPoint),
             CorsFilter.class);

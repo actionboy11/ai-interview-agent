@@ -29,6 +29,12 @@ V3 为简历、文字面试、语音面试、知识库、RAG 会话和面试日�
 6. 检查 V3 成功、Hibernate `validate` 成功、六个根表无空所有者且旧记录全部归属预期
    账号。核对记录数、简历关联和 RAG 会话关联后，再恢复流量并验证账号隔离。
 
+旧版知识库向量没有 `ownerUserId` 元数据，新版本检索会排除这些向量。数据所有者登录后，
+对本人每个旧知识库调用 `POST /api/knowledgebase/{id}/revectorize`；使用登录会话 Cookie，
+先取 `GET /api/auth/csrf`，再随 POST 发送返回的 CSRF header/token。接口只接受本人知识库，
+返回 `Result.code == 200` 表示异步任务已提交；继续查询该知识库详情的 `vectorStatus`，
+等待 `COMPLETED` 后再验证检索。`FAILED` 时检查 `vectorError` 并由所有者重试。
+
 不能在同一次首次部署中依赖 `InitialAdminBootstrap` 为 V3 创建账号：Flyway 在
 JPA 初始化和 `ApplicationRunner` 之前运行；有旧数据时，V3 会先失败，bootstrap
 没有机会执行。不要临时关闭外键/非空约束来绕过升级门槛。

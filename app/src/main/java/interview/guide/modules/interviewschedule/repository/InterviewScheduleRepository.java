@@ -19,6 +19,9 @@ public interface InterviewScheduleRepository extends JpaRepository<InterviewSche
   Optional<InterviewScheduleEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
   List<InterviewScheduleEntity> findByOwnerIdOrderByInterviewTimeAsc(UUID ownerId);
+  List<InterviewScheduleEntity> findByOwnerIdAndInterviewTimeBetween(
+      UUID ownerId, LocalDateTime start, LocalDateTime end);
+  List<InterviewScheduleEntity> findByOwnerIdAndStatus(UUID ownerId, InterviewStatus status);
     List<InterviewScheduleEntity> findByStatusAndInterviewTimeBefore(InterviewStatus status, LocalDateTime time);
 
     List<InterviewScheduleEntity> findByStatus(InterviewStatus status);

@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.file.FileStorageService;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
@@ -28,6 +29,7 @@ public class KnowledgeBaseDeleteService {
     private final KnowledgeBaseVectorService vectorService;
     private final FileStorageService storageService;
     private final TransactionalExecutor transactionalExecutor;
+    private final CurrentUserProvider currentUser;
     
     /**
      * 删除知识库
@@ -52,7 +54,8 @@ public class KnowledgeBaseDeleteService {
 
     private String deleteKnowledgeBaseRecords(Long id) {
         // 1. 获取知识库信息
-        KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(id)
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.findByOwnerIdAndId(
+            currentUser.requireUserId(), id)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
         String storageKey = kb.getStorageKey();
         

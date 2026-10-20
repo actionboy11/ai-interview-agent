@@ -1,6 +1,7 @@
 package interview.guide.modules.knowledgebase;
 
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.CreateSessionRequest;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.SendMessageRequest;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.SessionDTO;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * RAG 聊天控制器
@@ -36,6 +38,7 @@ import java.util.List;
 public class RagChatController {
 
     private final RagChatSessionService sessionService;
+    private final CurrentUserProvider currentUser;
 
     /**
      * 创建新会话
@@ -122,6 +125,7 @@ public class RagChatController {
 
         // 1. 准备消息（保存用户消息，创建 AI 消息占位）
         Long messageId = sessionService.prepareStreamMessage(sessionId, request.question());
+        UUID ownerId = currentUser.requireUserId();
 
         // 2. 获取流式响应
         StringBuilder fullContent = new StringBuilder();
@@ -134,7 +138,8 @@ public class RagChatController {
                 .build())
             .doOnComplete(() -> {
                 // 3. 流式完成后更新消息内容
-                sessionService.completeStreamMessage(messageId, fullContent.toString());
+                sessionService.completeStreamMessage(messageId, sessionId, ownerId,
+                    fullContent.toString());
                 log.info("RAG 聊天流式完成: sessionId={}, messageId={}", sessionId, messageId);
             })
             .doOnError(e -> {
@@ -142,7 +147,7 @@ public class RagChatController {
                 String content = !fullContent.isEmpty()
                     ? fullContent.toString()
                     : "【错误】回答生成失败：" + e.getMessage();
-                sessionService.completeStreamMessage(messageId, content);
+                sessionService.completeStreamMessage(messageId, sessionId, ownerId, content);
                 log.error("RAG 聊天流式错误: sessionId={}", sessionId, e);
             });
     }

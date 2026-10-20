@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.messaging.VoiceEvaluationTaskPublisher;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
@@ -35,7 +37,9 @@ class VoiceInterviewServiceMessagingTest {
             mock(RedissonClient.class),
             mock(VoiceInterviewProperties.class),
             publisher,
-            mock(LlmProviderRegistry.class)
+            mock(LlmProviderRegistry.class),
+            mock(CurrentUserProvider.class),
+            mock(ResumeRepository.class)
         );
 
         service.triggerEvaluation(42L);
@@ -77,7 +81,9 @@ class VoiceInterviewServiceMessagingTest {
             mock(RedissonClient.class),
             mock(VoiceInterviewProperties.class),
             publisher,
-            mock(LlmProviderRegistry.class)
+            mock(LlmProviderRegistry.class),
+            mock(CurrentUserProvider.class),
+            mock(ResumeRepository.class)
         );
     }
 }

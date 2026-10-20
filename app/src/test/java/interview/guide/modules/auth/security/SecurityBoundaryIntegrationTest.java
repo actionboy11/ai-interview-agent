@@ -65,6 +65,19 @@ public class SecurityBoundaryIntegrationTest extends AuthWebTestSupport {
   }
 
   @Test
+  @DisplayName("普通用户不能读取或更改全局模型和语音提供商设置")
+  void providerSettingsRequireAdmin() throws Exception {
+    createUser("provider-user", UserRole.USER);
+    var user = login("provider-user");
+    mvc.perform(user.read(get("/api/llm-provider/list")))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(403));
+    mvc.perform(user.mutate(post("/api/llm-provider/reload")))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(403));
+    mvc.perform(user.read(get("/api/llm-provider/voice/asr")))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(403));
+  }
+
+  @Test
   @DisplayName("已登录变更要求可用 Cookie/header CSRF，允许显式来源携带凭证")
   void csrfAndCors() throws Exception {
     createUser("alice", UserRole.USER);

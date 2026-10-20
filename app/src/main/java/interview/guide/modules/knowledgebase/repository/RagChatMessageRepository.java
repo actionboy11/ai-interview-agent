@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * RAG聊天消息Repository
@@ -51,4 +52,6 @@ public interface RagChatMessageRepository extends JpaRepository<RagChatMessageEn
      * 统计所有用户消息数（即总提问次数）
      */
     long countByType(MessageType type);
+
+    long countByTypeAndSessionOwnerId(MessageType type, UUID ownerId);
 }

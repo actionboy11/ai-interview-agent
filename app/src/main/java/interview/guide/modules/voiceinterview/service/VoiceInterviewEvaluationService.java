@@ -9,6 +9,7 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.modules.interview.skill.InterviewSkillService;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationDetailDTO;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationDetailDTO.AnswerDetail;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewEvaluationEntity;
@@ -64,6 +65,9 @@ public class VoiceInterviewEvaluationService {
             log.info("开始生成语音面试评估: sessionId={}", sessionId);
 
             VoiceInterviewSessionEntity session = getSession(sessionId);
+            if (session.getOwner() == null || session.getOwner().getStatus() != UserStatus.ACTIVE) {
+                throw new BusinessException(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已禁用");
+            }
             List<VoiceInterviewMessageEntity> messages = messageRepository
                 .findBySessionIdOrderBySequenceNumAsc(sessionId);
 

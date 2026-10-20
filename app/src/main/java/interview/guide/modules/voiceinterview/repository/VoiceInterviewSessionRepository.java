@@ -21,10 +21,8 @@ public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInte
 
   List<VoiceInterviewSessionEntity> findByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
-    /**
-     * 根据用户ID查找所有会话，按开始时间倒序
-     */
-    List<VoiceInterviewSessionEntity> findByUserIdOrderByStartTimeDesc(String userId);
+  List<VoiceInterviewSessionEntity> findByOwnerIdAndStatusOrderByUpdatedAtDesc(
+      UUID ownerId, VoiceInterviewSessionStatus status);
 
     /**
      * 查找指定状态且结束时间早于给定时间的会话
@@ -33,19 +31,6 @@ public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInte
     Optional<VoiceInterviewSessionEntity> findByStatusAndEndTimeBefore(
         interview.guide.common.model.AsyncTaskStatus status,
         LocalDateTime time
-    );
-
-    /**
-     * Find all sessions for a user, ordered by update time
-     */
-    List<VoiceInterviewSessionEntity> findByUserIdOrderByUpdatedAtDesc(String userId);
-
-    /**
-     * Find sessions by user and status, ordered by update time
-     */
-    List<VoiceInterviewSessionEntity> findByUserIdAndStatusOrderByUpdatedAtDesc(
-        String userId,
-        VoiceInterviewSessionStatus status
     );
 
     List<VoiceInterviewSessionEntity> findByStatusAndStartTimeBefore(

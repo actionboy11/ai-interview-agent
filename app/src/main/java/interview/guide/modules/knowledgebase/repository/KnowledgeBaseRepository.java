@@ -24,6 +24,35 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
 
   Optional<KnowledgeBaseEntity> findByOwnerIdAndFileHash(UUID ownerId, String fileHash);
 
+  List<KnowledgeBaseEntity> findAllByOwnerIdAndIdIn(UUID ownerId, List<Long> ids);
+
+  List<KnowledgeBaseEntity> findByOwnerIdAndVectorStatusOrderByUploadedAtDesc(
+      UUID ownerId, VectorStatus status);
+
+  List<KnowledgeBaseEntity> findByOwnerIdAndCategoryIsNullOrderByUploadedAtDesc(UUID ownerId);
+
+  List<KnowledgeBaseEntity> findByOwnerIdAndCategoryOrderByUploadedAtDesc(
+      UUID ownerId, String category);
+
+  @Query("SELECT DISTINCT k.category FROM KnowledgeBaseEntity k WHERE k.owner.id = :ownerId "
+      + "AND k.category IS NOT NULL ORDER BY k.category")
+  List<String> findAllCategoriesByOwnerId(@Param("ownerId") UUID ownerId);
+
+  @Query("SELECT k FROM KnowledgeBaseEntity k WHERE k.owner.id = :ownerId AND "
+      + "(LOWER(k.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR "
+      + "LOWER(k.originalFilename) LIKE LOWER(CONCAT('%', :keyword, '%'))) "
+      + "ORDER BY k.uploadedAt DESC")
+  List<KnowledgeBaseEntity> searchByKeywordForOwner(@Param("ownerId") UUID ownerId,
+      @Param("keyword") String keyword);
+
+  long countByOwnerId(UUID ownerId);
+
+  long countByOwnerIdAndVectorStatus(UUID ownerId, VectorStatus status);
+
+  @Query("SELECT COALESCE(SUM(k.accessCount), 0) FROM KnowledgeBaseEntity k "
+      + "WHERE k.owner.id = :ownerId")
+  long sumAccessCountForOwner(@Param("ownerId") UUID ownerId);
+
   boolean existsByOwnerIdAndFileHash(UUID ownerId, String fileHash);
 
     /**
@@ -90,6 +119,12 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
     @Modifying
     @Query("UPDATE KnowledgeBaseEntity k SET k.questionCount = k.questionCount + 1 WHERE k.id IN :ids")
     int incrementQuestionCountBatch(@Param("ids") List<Long> ids);
+
+    @Modifying
+    @Query("UPDATE KnowledgeBaseEntity k SET k.questionCount = k.questionCount + 1 "
+        + "WHERE k.owner.id = :ownerId AND k.id IN :ids")
+    int incrementQuestionCountBatchForOwner(@Param("ownerId") UUID ownerId,
+        @Param("ids") List<Long> ids);
 
     // ==================== 统计查询 ====================
 

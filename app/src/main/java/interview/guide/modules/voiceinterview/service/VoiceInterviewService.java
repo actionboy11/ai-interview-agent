@@ -5,6 +5,9 @@ import interview.guide.common.constant.CommonConstants.InterviewDefaults;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
@@ -29,6 +32,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -54,10 +58,11 @@ public class VoiceInterviewService {
     private final VoiceInterviewProperties properties;
     private final VoiceEvaluationTaskPublisher voiceEvaluationTaskPublisher;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final CurrentUserProvider currentUser;
+    private final ResumeRepository resumeRepository;
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
     private static final int CACHE_TTL_HOURS = 1;
-    private static final String DEFAULT_USER_ID = "default";
 
     /**
      * Create a new voice interview session
@@ -68,13 +73,21 @@ public class VoiceInterviewService {
      */
     @Transactional
     public SessionResponseDTO createSession(CreateSessionRequest request) {
+        UUID ownerId = currentUser.requireUserId();
+        if (request.getResumeId() != null
+            && resumeRepository.findByOwnerIdAndId(ownerId, request.getResumeId()).isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "简历不存在");
+        }
+        UserEntity owner = new UserEntity();
+        owner.setId(ownerId);
         String effectiveSkillId = request.getSkillId() != null ? request.getSkillId() : InterviewDefaults.SKILL_ID;
         String effectiveLlmProvider = (request.getLlmProvider() != null && !request.getLlmProvider().isBlank())
             ? request.getLlmProvider()
             : null;
 
         VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
-                .userId(DEFAULT_USER_ID)
+                .owner(owner)
+                .userId(ownerId.toString())
                 .roleType(effectiveSkillId)
                 .skillId(effectiveSkillId)
                 .difficulty(request.getDifficulty() != null ? request.getDifficulty() : InterviewDefaults.DIFFICULTY)
@@ -182,6 +195,17 @@ public class VoiceInterviewService {
 
         // Fallback to database
         return sessionRepository.findById(sessionId).orElse(null);
+    }
+
+    /** Always consult the database for an HTTP or WebSocket ownership decision. */
+    public VoiceInterviewSessionEntity requireOwnedSession(Long sessionId) {
+        return requireSessionOwner(sessionId, currentUser.requireUserId());
+    }
+
+    public VoiceInterviewSessionEntity requireSessionOwner(Long sessionId, UUID ownerId) {
+        return sessionRepository.findByOwnerIdAndId(ownerId, sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
+                "会话不存在: " + sessionId));
     }
 
     /**
@@ -381,20 +405,19 @@ public class VoiceInterviewService {
      * Get all sessions for a user
      * 获取用户所有会话
      *
-     * @param userId User ID (optional, defaults to DEFAULT_USER_ID)
      * @param status Filter by status (optional)
      * @return List of session metadata
      */
-    public List<SessionMetaDTO> getAllSessions(String userId, String status) {
-        userId = userId != null ? userId : DEFAULT_USER_ID;
+    public List<SessionMetaDTO> getAllSessions(String status) {
+        UUID ownerId = currentUser.requireUserId();
 
         List<VoiceInterviewSessionEntity> sessions;
         if (status != null && !status.isEmpty()) {
             VoiceInterviewSessionStatus statusEnum =
                 VoiceInterviewSessionStatus.valueOf(status.toUpperCase());
-            sessions = sessionRepository.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, statusEnum);
+            sessions = sessionRepository.findByOwnerIdAndStatusOrderByUpdatedAtDesc(ownerId, statusEnum);
         } else {
-            sessions = sessionRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+            sessions = sessionRepository.findByOwnerIdOrderByUpdatedAtDesc(ownerId);
         }
 
         return sessions.stream()

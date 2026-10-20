@@ -3,6 +3,7 @@ package interview.guide.modules.knowledgebase.repository;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity.SessionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -19,7 +20,13 @@ public interface RagChatSessionRepository extends JpaRepository<RagChatSessionEn
 
   Optional<RagChatSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
+  @EntityGraph(attributePaths = "knowledgeBases")
   List<RagChatSessionEntity> findByOwnerIdOrderByIsPinnedDescUpdatedAtDesc(UUID ownerId);
+
+  @Query("SELECT s FROM RagChatSessionEntity s LEFT JOIN FETCH s.knowledgeBases "
+      + "WHERE s.owner.id = :ownerId AND s.id = :id")
+  Optional<RagChatSessionEntity> findByOwnerIdAndIdWithKnowledgeBases(
+      @Param("ownerId") UUID ownerId, @Param("id") Long id);
 
     /**
      * 按更新时间倒序获取所有活跃会话

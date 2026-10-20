@@ -1,6 +1,11 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.model.UserStatus;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +22,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +49,9 @@ import static org.mockito.Mockito.*;
 @SuppressWarnings("unchecked") // Mockito ArgumentCaptor 泛型警告
 class KnowledgeBaseVectorServiceTest {
 
+    private static final UUID OWNER_ID = UUID.fromString("b1bd7095-1cd2-4b93-916f-37268ac8cc84");
+    private UserStatus ownerStatus = UserStatus.ACTIVE;
+
     private KnowledgeBaseVectorService vectorService;
 
     @Mock
@@ -50,10 +60,36 @@ class KnowledgeBaseVectorServiceTest {
     @Mock
     private VectorRepository vectorRepository;
 
+    @Mock
+    private KnowledgeBaseRepository knowledgeBaseRepository;
+
+    @Mock
+    private CurrentUserProvider currentUser;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        vectorService = new KnowledgeBaseVectorService(vectorStore, vectorRepository);
+        ownerStatus = UserStatus.ACTIVE;
+        vectorService = new KnowledgeBaseVectorService(vectorStore, vectorRepository,
+            null, knowledgeBaseRepository, currentUser);
+        when(currentUser.requireUserId()).thenReturn(OWNER_ID);
+        when(knowledgeBaseRepository.findById(any())).thenAnswer(invocation -> {
+            Long id = invocation.getArgument(0);
+            var kb = new KnowledgeBaseEntity();
+            kb.setId(id);
+            var owner = new UserEntity();
+            owner.setId(OWNER_ID);
+            owner.setStatus(ownerStatus);
+            kb.setOwner(owner);
+            return Optional.of(kb);
+        });
+        when(knowledgeBaseRepository.findAllByOwnerIdAndIdIn(any(), anyList()))
+            .thenAnswer(invocation -> ((List<Long>) invocation.getArgument(1)).stream()
+                .distinct().map(id -> {
+                    var kb = new KnowledgeBaseEntity();
+                    kb.setId(id);
+                    return kb;
+                }).toList());
     }
 
     // ==================== 共享辅助方法 ====================
@@ -89,6 +125,7 @@ class KnowledgeBaseVectorServiceTest {
             if (kbId != null) {
                 metadata.put("kb_id", kbId);
             }
+            metadata.put("ownerUserId", OWNER_ID.toString());
             documents.add(new Document("文档内容 " + i, metadata));
         }
         return documents;
@@ -107,6 +144,7 @@ class KnowledgeBaseVectorServiceTest {
     private Document createDocumentWithLongKbId(Long kbId) {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("kb_id", kbId); // Long 类型
+        metadata.put("ownerUserId", OWNER_ID.toString());
         return new Document("Long kb_id 文档", metadata);
     }
 
@@ -118,6 +156,7 @@ class KnowledgeBaseVectorServiceTest {
         if (invalidKbId != null) {
             metadata.put("kb_id", invalidKbId);
         }
+        metadata.put("ownerUserId", OWNER_ID.toString());
         return new Document("无效 kb_id 文档", metadata);
     }
 
@@ -156,6 +195,15 @@ class KnowledgeBaseVectorServiceTest {
     @Nested
     @DisplayName("向量化存储测试")
     class VectorizeAndStoreTests {
+
+        @Test
+        @DisplayName("禁用账号的待处理任务不会调用向量模型")
+        void disabledOwnerCannotVectorize() {
+            ownerStatus = UserStatus.DISABLED;
+            assertThrows(BusinessException.class,
+                () -> vectorService.vectorizeAndStore(1L, generateLongContent(5)));
+            verify(vectorStore, never()).add(anyList());
+        }
 
         @Test
         @DisplayName("文本向量化存储 - 验证基本流程")
@@ -291,6 +339,26 @@ class KnowledgeBaseVectorServiceTest {
     @Nested
     @DisplayName("相似度搜索测试")
     class SimilaritySearchTests {
+
+        @Test
+        @DisplayName("数据库过滤包含用户归属且旧向量缺失归属时不可检索")
+        void legacyVectorsFailClosedWithOwnerFilter() {
+            var legacy = new Document("旧向量", Map.of("kb_id", "1"));
+            var foreign = new Document("其他用户向量", Map.of(
+                "kb_id", "1", "ownerUserId", UUID.randomUUID().toString()));
+            var owned = new Document("当前用户向量", Map.of(
+                "kb_id", "1", "ownerUserId", OWNER_ID.toString()));
+            when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of(legacy, foreign, owned));
+
+            List<Document> result = vectorService.similaritySearch("问题", List.of(1L), 5, 0.0);
+
+            assertEquals(List.of(owned), result);
+            ArgumentCaptor<SearchRequest> requests = ArgumentCaptor.forClass(SearchRequest.class);
+            verify(vectorStore).similaritySearch(requests.capture());
+            assertTrue(requests.getValue().getFilterExpression().toString()
+                .contains(OWNER_ID.toString()));
+        }
 
         @Test
         @DisplayName("基本搜索 - 无过滤条件")

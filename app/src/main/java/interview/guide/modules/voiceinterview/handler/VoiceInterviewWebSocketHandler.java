@@ -8,6 +8,7 @@ import interview.guide.modules.voiceinterview.dto.WebSocketSubtitleMessage;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
+import interview.guide.modules.voiceinterview.config.VoiceInterviewHandshakeInterceptor;
 import interview.guide.modules.voiceinterview.service.QwenAsrService;
 import interview.guide.modules.voiceinterview.service.QwenTtsService;
 import interview.guide.modules.voiceinterview.service.DashscopeLlmService;
@@ -30,6 +31,7 @@ import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -142,6 +144,10 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String sessionId = extractSessionId(session);
+        if (!hasVerifiedOwner(session)) {
+            session.close(CloseStatus.POLICY_VIOLATION);
+            return;
+        }
 
         // Increase message size limits for audio streaming
         // 1 second of PCM audio @ 16kHz, 16-bit = ~32KB raw, ~42KB base64
@@ -153,7 +159,10 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
             session, WS_SEND_TIME_LIMIT_MS, WS_SEND_BUFFER_LIMIT_BYTES
         );
 
-        sessions.put(sessionId, safeSession);
+        WebSocketSession prior = sessions.put(sessionId, safeSession);
+        if (prior != null && prior.isOpen()) {
+            prior.close(CloseStatus.NORMAL);
+        }
         sessionStates.put(sessionId, new SessionState());
         lastActivityTime.put(sessionId, System.currentTimeMillis());
         log.info("WebSocket connection established for session: {}", sessionId);
@@ -302,6 +311,10 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String sessionId = extractSessionId(session);
+        if (!hasVerifiedOwner(session)) {
+            session.close(CloseStatus.POLICY_VIOLATION);
+            return;
+        }
 
         try {
             JsonNode msg = objectMapper.readTree(message.getPayload());
@@ -366,6 +379,14 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         String sessionId = extractSessionId(session);
+        if (!hasHandshakeOwner(session)) {
+            return;
+        }
+        WebSocketSession active = sessions.get(sessionId);
+        if (active != null && !active.getId().equals(session.getId())) {
+            return;
+        }
+        boolean persistedOwnerMatches = hasVerifiedOwner(session);
         try {
             sessions.remove(sessionId);
             SessionState removedState = sessionStates.remove(sessionId);
@@ -383,7 +404,9 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
             // WebSocket 异常断开时自动结束会话，防止状态永远停留在 IN_PROGRESS
             try {
-                interviewService.endSessionIfInProgress(sessionId);
+                if (persistedOwnerMatches) {
+                    interviewService.endSessionIfInProgress(sessionId);
+                }
             } catch (Exception endEx) {
                 log.warn("Failed to auto-end session {} after disconnect: {}", sessionId, endEx.getMessage());
             }
@@ -1162,7 +1185,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      */
     private void sendPauseWarning(String sessionId) {
         WebSocketSession session = sessions.get(sessionId);
-        if (session != null && session.isOpen()) {
+        if (session != null && session.isOpen() && hasVerifiedOwner(session)) {
             sendMessage(session, toJson(Map.of(
                 "type", "control",
                 "action", "pause_timeout_warning",
@@ -1178,6 +1201,21 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      */
     private void handlePauseTimeout(String sessionId) {
         WebSocketSession session = sessions.get(sessionId);
+
+        if (session == null || !hasVerifiedOwner(session)) {
+            sessions.remove(sessionId);
+            sessionStates.remove(sessionId);
+            lastActivityTime.remove(sessionId);
+            if (session != null && session.isOpen()) {
+                try {
+                    session.close(CloseStatus.POLICY_VIOLATION);
+                } catch (Exception exception) {
+                    log.warn("Failed to close invalid voice connection: sessionId={}",
+                        sessionId, exception);
+                }
+            }
+            return;
+        }
 
         try {
             if (session != null && session.isOpen()) {
@@ -1217,6 +1255,31 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     private String extractSessionId(WebSocketSession session) {
         String path = session.getUri().getPath();
         return path.substring(path.lastIndexOf('/') + 1);
+    }
+
+    private boolean hasVerifiedOwner(WebSocketSession session) {
+        if (!hasHandshakeOwner(session)) {
+            return false;
+        }
+        UUID ownerId = (UUID) session.getAttributes().get(
+            VoiceInterviewHandshakeInterceptor.OWNER_ID_ATTRIBUTE);
+        Long verifiedId = (Long) session.getAttributes().get(
+            VoiceInterviewHandshakeInterceptor.SESSION_ID_ATTRIBUTE);
+        try {
+            interviewService.requireSessionOwner(verifiedId, ownerId);
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private boolean hasHandshakeOwner(WebSocketSession session) {
+        Object ownerValue = session.getAttributes().get(
+            VoiceInterviewHandshakeInterceptor.OWNER_ID_ATTRIBUTE);
+        Object idValue = session.getAttributes().get(
+            VoiceInterviewHandshakeInterceptor.SESSION_ID_ATTRIBUTE);
+        return ownerValue instanceof UUID && idValue instanceof Long verifiedId
+            && verifiedId.toString().equals(extractSessionId(session));
     }
 
     /**

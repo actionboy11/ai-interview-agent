@@ -12,6 +12,8 @@ import interview.guide.common.evaluation.UnifiedEvaluationService;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.modules.interview.skill.InterviewSkillService;
+import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewEvaluationEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.repository.VoiceInterviewEvaluationRepository;
@@ -50,7 +52,10 @@ class VoiceEvaluationPersistenceIdempotencyTest {
             mock(InterviewSkillService.class),
             transactionalExecutor
         );
-        session = VoiceInterviewSessionEntity.builder().id(42L).roleType("java").build();
+        var owner = new UserEntity();
+        owner.setStatus(UserStatus.ACTIVE);
+        session = VoiceInterviewSessionEntity.builder().id(42L).owner(owner)
+            .roleType("java").build();
         when(sessionRepository.findById(42L)).thenReturn(Optional.of(session));
     }
 

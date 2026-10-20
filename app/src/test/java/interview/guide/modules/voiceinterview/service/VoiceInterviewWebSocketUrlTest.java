@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.SessionResponseDTO;
 import interview.guide.modules.voiceinterview.messaging.VoiceEvaluationTaskPublisher;
@@ -47,7 +49,9 @@ class VoiceInterviewWebSocketUrlTest {
         redissonClient,
         mock(VoiceInterviewProperties.class),
         mock(VoiceEvaluationTaskPublisher.class),
-        mock(LlmProviderRegistry.class)
+        mock(LlmProviderRegistry.class),
+        mock(CurrentUserProvider.class),
+        mock(ResumeRepository.class)
     );
 
     SessionResponseDTO response = service.resumeSession("42");

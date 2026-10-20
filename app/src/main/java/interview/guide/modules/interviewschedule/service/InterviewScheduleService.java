@@ -2,6 +2,8 @@ package interview.guide.modules.interviewschedule.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interviewschedule.model.CreateInterviewRequest;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleDTO;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleEntity;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
 public class InterviewScheduleService {
 
     private final InterviewScheduleRepository repository;
+    private final CurrentUserProvider currentUser;
 
     private static final String[] COPYABLE_FIELDS = {
         "companyName", "position", "interviewTime", "interviewType",
@@ -31,6 +34,9 @@ public class InterviewScheduleService {
     public InterviewScheduleDTO create(CreateInterviewRequest request) {
         InterviewScheduleEntity entity = new InterviewScheduleEntity();
         BeanUtils.copyProperties(request, entity);
+        UserEntity owner = new UserEntity();
+        owner.setId(currentUser.requireUserId());
+        entity.setOwner(owner);
         entity.setStatus(InterviewStatus.PENDING);
 
         return toDTO(repository.save(entity));
@@ -39,13 +45,13 @@ public class InterviewScheduleService {
     @Transactional
     public InterviewScheduleDTO update(Long id, CreateInterviewRequest request) {
         InterviewScheduleEntity entity = getByIdOrThrow(id);
-        BeanUtils.copyProperties(request, entity, "id", "status");
+        BeanUtils.copyProperties(request, entity, "id", "status", "owner");
         return toDTO(repository.save(entity));
     }
 
     @Transactional
     public void delete(Long id) {
-        repository.deleteById(id);
+        repository.delete(getByIdOrThrow(id));
     }
 
     @Transactional
@@ -59,11 +65,13 @@ public class InterviewScheduleService {
         List<InterviewScheduleEntity> entities;
 
         if (start != null && end != null) {
-            entities = repository.findByInterviewTimeBetween(start, end);
+            entities = repository.findByOwnerIdAndInterviewTimeBetween(
+                currentUser.requireUserId(), start, end);
         } else if (status != null) {
-            entities = repository.findByStatus(InterviewStatus.valueOf(status));
+            entities = repository.findByOwnerIdAndStatus(
+                currentUser.requireUserId(), InterviewStatus.valueOf(status));
         } else {
-            entities = repository.findAll();
+            entities = repository.findByOwnerIdOrderByInterviewTimeAsc(currentUser.requireUserId());
         }
 
         return entities.stream()
@@ -76,7 +84,7 @@ public class InterviewScheduleService {
     }
 
     private InterviewScheduleEntity getByIdOrThrow(Long id) {
-        return repository.findById(id)
+        return repository.findByOwnerIdAndId(currentUser.requireUserId(), id)
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SCHEDULE_NOT_FOUND, "面试日程不存在: " + id));
     }
 

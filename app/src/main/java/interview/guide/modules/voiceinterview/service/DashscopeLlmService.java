@@ -156,8 +156,9 @@ public class DashscopeLlmService {
 
     private PromptContext buildPromptContext(String userInput, VoiceInterviewSessionEntity session, List<String> conversationHistory) {
         String resumeText = null;
-        if (session.getResumeId() != null) {
-            ResumeEntity resume = resumeRepository.findById(session.getResumeId()).orElse(null);
+        if (session.getResumeId() != null && session.getOwner() != null) {
+            ResumeEntity resume = resumeRepository.findByOwnerIdAndId(
+                session.getOwner().getId(), session.getResumeId()).orElse(null);
             if (resume != null) {
                 resumeText = resume.getResumeText();
             }

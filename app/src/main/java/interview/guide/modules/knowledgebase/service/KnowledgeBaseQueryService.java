@@ -208,9 +208,9 @@ public class KnowledgeBaseQueryService {
             return Flux.just(NO_RESULT_RESPONSE);
         }
 
+        // 验证归属在任何向量搜索和 LLM 调用之前完成；非法 ID 按不存在返回。
+        countService.updateQuestionCounts(knowledgeBaseIds);
         try {
-            // 1. 验证知识库是否存在并更新问题计数
-            countService.updateQuestionCounts(knowledgeBaseIds);
 
             // 2. Query rewrite + 动态参数检索
             List<Message> effectiveHistory = sanitizeHistory(history);

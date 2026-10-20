@@ -3,6 +3,9 @@ package interview.guide.modules.knowledgebase.service;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.transaction.TransactionalExecutor;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.auth.model.UserStatus;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -34,26 +37,29 @@ public class KnowledgeBaseVectorService {
     private static final String METADATA_KB_ID = "kb_id";
     private static final String METADATA_TARGET_KB_ID = "kb_target_id";
     private static final String METADATA_VECTOR_JOB_ID = "kb_vector_job_id";
+    private static final String METADATA_OWNER_USER_ID = "ownerUserId";
     private final VectorStore vectorStore;
     private final TextSplitter textSplitter;
     private final VectorRepository vectorRepository;
     private final TransactionalExecutor transactionalExecutor;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final CurrentUserProvider currentUser;
 
     @Autowired
     public KnowledgeBaseVectorService(
         VectorStore vectorStore,
         VectorRepository vectorRepository,
-        TransactionalExecutor transactionalExecutor
+        TransactionalExecutor transactionalExecutor,
+        KnowledgeBaseRepository knowledgeBaseRepository,
+        CurrentUserProvider currentUser
     ) {
         this.vectorStore = vectorStore;
         this.vectorRepository = vectorRepository;
         this.transactionalExecutor = transactionalExecutor;
+        this.knowledgeBaseRepository = knowledgeBaseRepository;
+        this.currentUser = currentUser;
         // 使用 TokenTextSplitter 默认配置，每个 chunk 约 800 tokens，基于标点边界切分（无重叠）
         this.textSplitter = TokenTextSplitter.builder().build();
-    }
-
-    KnowledgeBaseVectorService(VectorStore vectorStore, VectorRepository vectorRepository) {
-        this(vectorStore, vectorRepository, null);
     }
 
     /**
@@ -67,6 +73,13 @@ public class KnowledgeBaseVectorService {
             if (knowledgeBaseId == null) {
                 throw new IllegalArgumentException("knowledgeBaseId不能为空");
             }
+            var knowledgeBase = knowledgeBaseRepository.findById(knowledgeBaseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
+            if (knowledgeBase.getOwner() == null
+                || knowledgeBase.getOwner().getStatus() != UserStatus.ACTIVE) {
+                throw new BusinessException(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已禁用");
+            }
+            UUID ownerId = knowledgeBase.getOwner().getId();
             jobId = UUID.randomUUID().toString();
             log.info("开始向量化知识库: kbId={}, jobId={}, contentLength={}",
                 knowledgeBaseId, jobId, content.length());
@@ -79,7 +92,7 @@ public class KnowledgeBaseVectorService {
             log.info("文本分块完成: {} 个chunks", chunks.size());
             
             // 2. 为每个 chunk 添加临时 metadata，成功后再提升为正式 kb_id。
-            applyPendingMetadata(chunks, knowledgeBaseId, jobId);
+            applyPendingMetadata(chunks, knowledgeBaseId, jobId, ownerId);
 
             // 3. 分批向量化并存储（阿里云 DashScope API 限制 batch size <= 10）
             int totalChunks = chunks.size();
@@ -106,12 +119,14 @@ public class KnowledgeBaseVectorService {
         }
     }
 
-    private void applyPendingMetadata(List<Document> chunks, Long knowledgeBaseId, String jobId) {
+    private void applyPendingMetadata(List<Document> chunks, Long knowledgeBaseId, String jobId,
+                                      UUID ownerId) {
         String pendingKbId = TEMP_KB_ID_PREFIX + knowledgeBaseId + ":" + jobId;
         chunks.forEach(chunk -> {
             chunk.getMetadata().put(METADATA_KB_ID, pendingKbId);
             chunk.getMetadata().put(METADATA_TARGET_KB_ID, knowledgeBaseId.toString());
             chunk.getMetadata().put(METADATA_VECTOR_JOB_ID, jobId);
+            chunk.getMetadata().put(METADATA_OWNER_USER_ID, ownerId.toString());
         });
     }
     
@@ -124,6 +139,15 @@ public class KnowledgeBaseVectorService {
      * @return 相关文档列表
      */
     public List<Document> similaritySearch(String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
+        UUID ownerId = currentUser.requireUserId();
+        if (topK <= 0) {
+            return List.of();
+        }
+        if (knowledgeBaseIds != null && !knowledgeBaseIds.isEmpty()
+            && knowledgeBaseRepository.findAllByOwnerIdAndIdIn(ownerId, knowledgeBaseIds).size()
+                != knowledgeBaseIds.stream().distinct().count()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在");
+        }
         log.info("向量相似度搜索: query={}, kbIds={}, topK={}, minScore={}",
             query, knowledgeBaseIds, topK, minScore);
         
@@ -136,9 +160,9 @@ public class KnowledgeBaseVectorService {
                 builder.similarityThreshold(minScore);
             }
 
-            if (knowledgeBaseIds != null && !knowledgeBaseIds.isEmpty()) {
-                builder.filterExpression(buildKbFilterExpression(knowledgeBaseIds));
-            }
+            builder.filterExpression("ownerUserId == '" + ownerId + "'"
+                + (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() ? ""
+                    : " && " + buildKbFilterExpression(knowledgeBaseIds)));
 
             List<Document> results = vectorStore.similaritySearch(builder.build());
             if (results == null) {
@@ -147,49 +171,21 @@ public class KnowledgeBaseVectorService {
 
             // Apply topK limiting in case VectorStore returns more than requested
             List<Document> limitedResults = results.stream()
+                .filter(doc -> ownerId.toString().equals(
+                    doc.getMetadata().get(METADATA_OWNER_USER_ID)))
+                .filter(doc -> knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()
+                    || isDocInKnowledgeBases(doc, knowledgeBaseIds))
                 .limit(topK)
                 .collect(Collectors.toList());
 
             log.info("搜索完成: 找到 {} 个相关文档", limitedResults.size());
             return limitedResults;
             
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            log.warn("向量搜索前置过滤失败，回退到本地过滤: {}", e.getMessage());
-            return similaritySearchFallback(query, knowledgeBaseIds, topK, minScore);
-        }
-    }
-
-    private List<Document> similaritySearchFallback(String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
-        try {
-            // 回退检索仍保留 topK/minScore，避免兜底路径引入过多弱相关命中
-            SearchRequest.Builder builder = SearchRequest.builder()
-                .query(query)
-                .topK(Math.max(topK * 3, topK));
-            if (minScore > 0) {
-                builder.similarityThreshold(minScore);
-            }
-
-            List<Document> allResults = vectorStore.similaritySearch(builder.build());
-            if (allResults == null || allResults.isEmpty()) {
-                return List.of();
-            }
-
-            if (knowledgeBaseIds != null && !knowledgeBaseIds.isEmpty()) {
-                allResults = allResults.stream()
-                    .filter(doc -> isDocInKnowledgeBases(doc, knowledgeBaseIds))
-                    .collect(Collectors.toList());
-            }
-
-            List<Document> results = allResults.stream()
-                .limit(topK)
-                .collect(Collectors.toList());
-
-            log.info("回退检索完成: 找到 {} 个相关文档", results.size());
-            return results;
-        } catch (Exception e) {
-            log.error("向量搜索失败: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED,
-                "向量搜索失败: " + e.getMessage());
+            log.error("向量搜索失败", e);
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED, "向量搜索失败");
         }
     }
 
