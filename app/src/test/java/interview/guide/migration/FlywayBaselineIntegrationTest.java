@@ -79,6 +79,13 @@ class FlywayBaselineIntegrationTest {
     assertThat(jdbc.queryForList(BUSINESS_CONSTRAINTS, String.class))
         .containsExactlyInAnyOrderElementsOf(
             reference.queryForList(BUSINESS_CONSTRAINTS, String.class));
+    assertThat(jdbc.queryForList("""
+        select conname from pg_constraint where conname in
+          ('fk_ability_proposal_owner_session', 'fk_ability_evidence_answer_scope',
+            'fk_ability_evidence_proposal_scope')
+        """, String.class)).containsExactlyInAnyOrder(
+            "fk_ability_proposal_owner_session", "fk_ability_evidence_answer_scope",
+            "fk_ability_evidence_proposal_scope");
     assertThat(jdbc.queryForList(BUSINESS_INDEXES))
         .containsExactlyInAnyOrderElementsOf(reference.queryForList(BUSINESS_INDEXES));
     assertAbilityMemoryConstraints(jdbc);
@@ -122,10 +129,12 @@ class FlywayBaselineIntegrationTest {
     String proposal = """
         insert into ability_profile_proposals (user_id, interview_session_id, skill_id,
           category_key, proposed_level, proposed_score, status, created_at, version)
-        values (?::uuid, ?, 'java-backend', 'JAVA', 'COMPETENT', 70, 'PROPOSED', now(), 0)
+        values (?::uuid, ?, ?, ?, 'COMPETENT', 70, 'PROPOSED', now(), 0)
         """;
-    jdbc.update(proposal, first, sessionId);
-    assertThatThrownBy(() -> jdbc.update(proposal, first, sessionId))
+    assertThatThrownBy(() -> jdbc.update(proposal, second, sessionId, "java-backend", "JAVA"))
+        .hasMessageContaining("foreign key");
+    jdbc.update(proposal, first, sessionId, "java-backend", "JAVA");
+    assertThatThrownBy(() -> jdbc.update(proposal, first, sessionId, "java-backend", "JAVA"))
         .hasMessageContaining("uk_ability_proposal_session_category");
     Long proposalId = jdbc.queryForObject("""
         select id from ability_profile_proposals where interview_session_id = ?
@@ -137,13 +146,48 @@ class FlywayBaselineIntegrationTest {
     Long answerId = jdbc.queryForObject("""
         select id from interview_answers where session_id = ?
         """, Long.class, sessionId);
+    jdbc.update("""
+        insert into interview_sessions (session_id, owner_user_id, created_at)
+        values ('other-memory-session', ?::uuid, now())
+        """, first);
+    Long otherSessionId = jdbc.queryForObject("""
+        select id from interview_sessions where session_id = 'other-memory-session'
+        """, Long.class);
+    jdbc.update(proposal, first, otherSessionId, "java-backend", "JAVA");
+    Long otherProposalId = jdbc.queryForObject("""
+        select id from ability_profile_proposals where interview_session_id = ?
+        """, Long.class, otherSessionId);
+    jdbc.update("""
+        insert into interview_answers (session_id, question_index, category_key, answered_at)
+        values (?, 0, 'JAVA', now())
+        """, otherSessionId);
+    Long otherAnswerId = jdbc.queryForObject("""
+        select id from interview_answers where session_id = ?
+        """, Long.class, otherSessionId);
+    jdbc.update(proposal, first, sessionId, "java-backend", "SPRING");
+    Long otherCategoryProposalId = jdbc.queryForObject("""
+        select id from ability_profile_proposals
+        where interview_session_id = ? and category_key = 'SPRING'
+        """, Long.class, sessionId);
     String evidence = """
         insert into user_ability_evidence (user_id, interview_session_id, interview_answer_id,
           proposal_id, skill_id, category_key, question_score, occurred_at)
-        values (?::uuid, ?, ?, ?, 'java-backend', 'JAVA', 70, now())
+        values (?::uuid, ?, ?, ?, ?, ?, 70, now())
         """;
-    jdbc.update(evidence, first, sessionId, answerId, proposalId);
-    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId, proposalId))
+    assertThatThrownBy(() -> jdbc.update(evidence, second, sessionId, answerId, proposalId,
+        "java-backend", "JAVA")).hasMessageContaining("foreign key");
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, otherAnswerId, proposalId,
+        "java-backend", "JAVA")).hasMessageContaining("foreign key");
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId, otherProposalId,
+        "java-backend", "JAVA")).hasMessageContaining("foreign key");
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId,
+        otherCategoryProposalId, "java-backend", "JAVA"))
+        .hasMessageContaining("foreign key");
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId, proposalId,
+        "wrong-skill", "JAVA")).hasMessageContaining("foreign key");
+    jdbc.update(evidence, first, sessionId, answerId, proposalId, "java-backend", "JAVA");
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId, proposalId,
+        "java-backend", "JAVA"))
         .hasMessageContaining("uk_ability_evidence_answer");
     assertThat(jdbc.queryForObject("""
         select count(*) from user_ability_evidence where proposal_id = ?
@@ -163,6 +207,8 @@ class FlywayBaselineIntegrationTest {
       from pg_constraint c join pg_class t on t.oid = c.conrelid
       join pg_namespace n on n.oid = t.relnamespace
       where n.nspname = 'public' and t.relname not in ('flyway_schema_history', 'vector_store')
+      and c.conname not in ('fk_ability_proposal_owner_session',
+        'fk_ability_evidence_answer_scope', 'fk_ability_evidence_proposal_scope')
       """;
 
   private static final String BUSINESS_INDEXES = """

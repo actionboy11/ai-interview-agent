@@ -19,6 +19,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,7 +29,9 @@ import java.util.List;
  * 面试会话实体
  */
 @Entity
-@Table(name = "interview_sessions", indexes = {
+@Table(name = "interview_sessions", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_interview_id_owner", columnNames = {"id", "owner_user_id"})
+}, indexes = {
     @Index(name = "idx_interview_owner_created", columnList = "owner_user_id,created_at"),
     @Index(name = "idx_interview_owner_session", columnList = "owner_user_id,session_id"),
     @Index(name = "idx_interview_session_resume_created", columnList = "resume_id,created_at"),

@@ -24,7 +24,9 @@ import org.hibernate.annotations.Check;
 @Entity
 @Table(name = "ability_profile_proposals", uniqueConstraints = {
     @UniqueConstraint(name = "uk_ability_proposal_session_category",
-        columnNames = {"interview_session_id", "category_key"})
+        columnNames = {"interview_session_id", "category_key"}),
+    @UniqueConstraint(name = "uk_ability_proposal_scope",
+        columnNames = {"id", "user_id", "interview_session_id", "skill_id", "category_key"})
 }, indexes = {
     @Index(name = "idx_ability_proposal_owner_status", columnList = "user_id,status"),
     @Index(name = "idx_ability_proposal_owner_session", columnList = "user_id,interview_session_id")
