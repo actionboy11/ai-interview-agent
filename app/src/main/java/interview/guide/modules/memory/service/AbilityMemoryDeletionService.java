@@ -112,12 +112,12 @@ public class AbilityMemoryDeletionService {
         profile.setConfidence(Math.min(1.0, 0.25 + groups.size() * 0.25));
         profile.setLastEvaluatedAt(items.stream().map(UserAbilityEvidenceEntity::getOccurredAt)
             .max(Instant::compareTo).orElse(null));
-        boolean hasManualDecision = groups.stream().anyMatch(group ->
-            group.getFirst().getProposal().getStatus()
-                == AbilityProposalStatus.ACCEPTED_WITH_EDIT);
-        profile.setManuallyEdited(hasManualDecision);
-        if (hasManualDecision) {
-          var latest = groups.getLast().getFirst().getProposal();
+        var manualDecisions = groups.stream().map(group -> group.getFirst().getProposal())
+            .filter(proposal -> proposal.getStatus() == AbilityProposalStatus.ACCEPTED_WITH_EDIT)
+            .toList();
+        profile.setManuallyEdited(!manualDecisions.isEmpty());
+        if (!manualDecisions.isEmpty()) {
+          var latest = manualDecisions.getLast();
           profile.setLevel(latest.getFinalLevel());
           profile.setSummary(latest.getFinalSummary());
           if (profile.getStatus() == AbilityProfileStatus.DISABLED) {

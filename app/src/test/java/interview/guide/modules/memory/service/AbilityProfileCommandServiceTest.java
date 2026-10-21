@@ -301,6 +301,28 @@ class AbilityProfileCommandServiceTest {
   }
 
   @Test
+  @DisplayName("删除更早来源时按剩余确认重算分数，同时保留最近一次人工批准的等级摘要")
+  void replayUsesLatestSurvivingManualContentWhenLaterPlainDecisionSurvives() {
+    Fixture removed = fixture(20);
+    commands.accept(removed.ownerId(), removed.proposalId(), 0);
+    Fixture manual = fixture(removed.ownerId(), 80);
+    commands.acceptWithEdit(manual.ownerId(), manual.proposalId(), 0,
+        AbilityLevel.STRONG, "人工批准摘要");
+    Fixture plain = fixture(removed.ownerId(), 40);
+    commands.accept(plain.ownerId(), plain.proposalId(), 0);
+
+    deletions.deleteOwnedSessions(removed.ownerId(), List.of(removed.sessionId()));
+
+    var surviving = profile(removed.ownerId());
+    assertThat(surviving.getScore()).isEqualTo(68);
+    assertThat(surviving.getConfirmedEvidenceCount()).isEqualTo(2);
+    assertThat(surviving.getLevel()).isEqualTo(AbilityLevel.STRONG);
+    assertThat(surviving.getSummary()).isEqualTo("人工批准摘要");
+    assertThat(surviving.getStatus()).isEqualTo(AbilityProfileStatus.NEEDS_REVIEW);
+    assertThat(surviving.isManuallyEdited()).isTrue();
+  }
+
+  @Test
   @DisplayName("同类不同场次确认与删除并发时只保留有效证据且无内部异常")
   void concurrentAcceptAndDifferentSourceDeletion() throws Exception {
     Fixture old = fixture(80);
