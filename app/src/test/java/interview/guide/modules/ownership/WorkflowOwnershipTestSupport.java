@@ -22,12 +22,14 @@ import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
+import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewQuestionService;
 import interview.guide.modules.interview.service.InterviewSessionService;
+import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
@@ -61,6 +63,7 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Import({ResumePersistenceService.class, ResumeHistoryService.class, ResumeDeleteService.class,
     ResumeUploadService.class, InterviewPersistenceService.class, InterviewSessionService.class,
+    MemoryDerivationPublicationService.class,
     InterviewHistoryService.class, InterviewSessionCache.class, FileStorageService.class,
     FileHashService.class, FileValidationService.class, TransactionalExecutor.class,
     ResumeMapperImpl.class, InterviewMapperImpl.class, ObjectMapper.class,
@@ -87,6 +90,7 @@ abstract class WorkflowOwnershipTestSupport {
   @Autowired ResumeUploadService resumeUpload;
   @Autowired InterviewPersistenceService interviewPersistence;
   @Autowired InterviewSessionService interviewService;
+  @Autowired MemoryDerivationPublicationService memoryPublication;
   @Autowired InterviewHistoryService interviewHistory;
   @Autowired InterviewSessionCache cache;
   @Autowired FileStorageService storage;
@@ -99,6 +103,7 @@ abstract class WorkflowOwnershipTestSupport {
   @MockitoBean ResumeParseService parser;
   @MockitoBean ResumeAnalysisTaskPublisher resumePublisher;
   @MockitoBean InterviewEvaluationTaskPublisher interviewPublisher;
+  @MockitoBean AbilityMemoryDerivationTaskPublisher memoryPublisher;
   @MockitoBean InterviewQuestionService questions;
   @MockitoBean AnswerEvaluationService evaluation;
   @MockitoBean LlmProviderRegistry llm;

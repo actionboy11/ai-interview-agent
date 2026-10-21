@@ -6,6 +6,7 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.auth.repository.UserRepository;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.interview.model.HistoricalQuestion;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
@@ -25,8 +26,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 面试持久化服务
@@ -225,6 +229,7 @@ public class InterviewPersistenceService {
             session.setStrengthsJson(objectMapper.writeValueAsString(report.strengths()));
             session.setImprovementsJson(objectMapper.writeValueAsString(report.improvements()));
             session.setReferenceAnswersJson(objectMapper.writeValueAsString(report.referenceAnswers()));
+            session.setReportJson(objectMapper.writeValueAsString(report));
             session.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
             session.setCompletedAt(LocalDateTime.now());
 
@@ -287,6 +292,7 @@ public class InterviewPersistenceService {
 
         } catch (JacksonException e) {
             log.error("序列化报告失败: {}", e.getMessage(), e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存评估报告失败", e);
         }
     }
     
@@ -305,6 +311,10 @@ public class InterviewPersistenceService {
             return CompletionResult.SESSION_MISSING;
         }
         InterviewSessionEntity session = sessionOpt.get();
+        if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+            && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
         if (messageId.equals(session.getEvaluationMessageId())
             || sessionRepository.existsByEvaluationMessageId(messageId)) {
             return CompletionResult.ALREADY_COMPLETED;
@@ -322,6 +332,69 @@ public class InterviewPersistenceService {
         CREATED,
         ALREADY_COMPLETED,
         SESSION_MISSING
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isMemoryDerivationPendingInternal(String sessionId) {
+        return findBySessionIdInternal(sessionId).filter(session ->
+            session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED
+                && session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+                && session.getMemoryDerivationStatus() != AsyncTaskStatus.COMPLETED
+                && session.getOwner().getStatus() == UserStatus.ACTIVE).isPresent();
+    }
+
+    @Transactional
+    public void recordMemoryPublicationFailure(String sessionId, String reason) {
+        sessionRepository.findBySessionIdForDerivation(sessionId).ifPresent(session -> {
+            if (session.getMemoryDerivationStatus() != AsyncTaskStatus.COMPLETED
+                && session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+                session.setMemoryDerivationStatus(AsyncTaskStatus.FAILED);
+                session.setMemoryDerivationError(reason == null ? "Memory publication failed"
+                    : reason.substring(0, Math.min(500, reason.length())));
+                sessionRepository.save(session);
+            }
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<InterviewReportDTO> findCompletedReport(String sessionId) {
+        InterviewSessionEntity session = requireOwnedSession(sessionId);
+        if (session.getStatus() != InterviewSessionEntity.SessionStatus.EVALUATED
+            || session.getEvaluateStatus() != AsyncTaskStatus.COMPLETED) {
+            return Optional.empty();
+        }
+        if (session.getReportJson() != null) {
+            return Optional.of(objectMapper.readValue(session.getReportJson(), InterviewReportDTO.class));
+        }
+        List<InterviewAnswerEntity> answers = answerRepository
+            .findBySession_SessionIdOrderByQuestionIndex(sessionId);
+        List<InterviewReportDTO.QuestionEvaluation> details = answers.stream()
+            .filter(answer -> answer.getScore() != null)
+            .map(answer -> new InterviewReportDTO.QuestionEvaluation(
+                answer.getQuestionIndex(), answer.getQuestion(), answer.getCategoryKey(),
+                answer.getCategoryLabel(), answer.getUserAnswer(), answer.getScore(),
+                answer.getFeedback()))
+            .toList();
+        Map<String, List<InterviewAnswerEntity>> grouped = answers.stream()
+            .filter(answer -> answer.getScore() != null && answer.getCategoryKey() != null)
+            .collect(Collectors.groupingBy(InterviewAnswerEntity::getCategoryKey,
+                LinkedHashMap::new, Collectors.toList()));
+        List<InterviewReportDTO.CategoryScore> categoryScores = grouped.entrySet().stream()
+            .map(group -> new InterviewReportDTO.CategoryScore(group.getKey(),
+                group.getValue().getFirst().getCategoryLabel(),
+                (int) group.getValue().stream().mapToInt(InterviewAnswerEntity::getScore)
+                    .average().orElse(0), group.getValue().size()))
+            .toList();
+        return Optional.of(new InterviewReportDTO(sessionId,
+            session.getTotalQuestions() == null ? details.size() : session.getTotalQuestions(),
+            session.getOverallScore(), categoryScores, details, session.getOverallFeedback(),
+            readReportList(session.getStrengthsJson(), new TypeReference<>() {}),
+            readReportList(session.getImprovementsJson(), new TypeReference<>() {}),
+            readReportList(session.getReferenceAnswersJson(), new TypeReference<>() {})));
+    }
+
+    private <T> List<T> readReportList(String json, TypeReference<List<T>> type) {
+        return json == null ? List.of() : objectMapper.readValue(json, type);
     }
 
     public Optional<InterviewSessionEntity> findBySessionId(String sessionId) {

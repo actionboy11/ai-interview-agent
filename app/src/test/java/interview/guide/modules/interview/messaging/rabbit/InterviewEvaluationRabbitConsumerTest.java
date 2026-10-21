@@ -22,7 +22,7 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
-import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
+import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -42,7 +42,7 @@ class InterviewEvaluationRabbitConsumerTest {
   private InterviewPersistenceService persistenceService;
   private AnswerEvaluationService evaluationService;
   private InterviewEvaluationRabbitProducer producer;
-  private AbilityMemoryDerivationTaskPublisher memoryPublisher;
+  private MemoryDerivationPublicationService memoryPublication;
   private Channel channel;
   private InterviewEvaluationRabbitConsumer consumer;
 
@@ -52,7 +52,7 @@ class InterviewEvaluationRabbitConsumerTest {
     persistenceService = mock(InterviewPersistenceService.class);
     evaluationService = mock(AnswerEvaluationService.class);
     producer = mock(InterviewEvaluationRabbitProducer.class);
-    memoryPublisher = mock(AbilityMemoryDerivationTaskPublisher.class);
+    memoryPublication = mock(MemoryDerivationPublicationService.class);
     channel = mock(Channel.class);
     var properties = new InterviewEvaluationRabbitProperties(
         "rabbitmq", "main", "queue", "route", "dead", "dead.queue", "dead.route",
@@ -67,7 +67,7 @@ class InterviewEvaluationRabbitConsumerTest {
         producer,
         new InterviewEvaluationRetryPolicy(properties),
         mock(InterviewSessionCache.class),
-        memoryPublisher
+        memoryPublication
     );
   }
 
@@ -111,7 +111,7 @@ class InterviewEvaluationRabbitConsumerTest {
 
     consumer.consume(message("session-42", 0), envelope(18L), channel);
 
-    verify(memoryPublisher).publish("session-42");
+    verify(memoryPublication).publishIfPending("session-42");
     verify(channel).basicAck(18L, false);
     verify(evaluationService, never()).evaluateInterview(any(), any(), any(), any());
   }
@@ -126,7 +126,7 @@ class InterviewEvaluationRabbitConsumerTest {
     when(sessionRepository.findBySessionIdWithResume("session-42"))
         .thenReturn(Optional.of(session));
     doThrow(new IllegalStateException("broker unavailable"))
-        .when(memoryPublisher).publish("session-42");
+        .when(memoryPublication).publishIfPending("session-42");
 
     consumer.consume(message("session-42", 0), envelope(19L), channel);
 

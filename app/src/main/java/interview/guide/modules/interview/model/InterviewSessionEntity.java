@@ -111,6 +111,9 @@ public class InterviewSessionEntity {
     // 参考答案 (JSON)
     @Column(columnDefinition = "TEXT")
     private String referenceAnswersJson;
+
+    @Column(name = "report_json", columnDefinition = "TEXT")
+    private String reportJson;
     
     // 面试答案记录
     @OneToMany(mappedBy = "session", cascade = CascadeType.ALL, orphanRemoval = true)
@@ -260,6 +263,14 @@ public class InterviewSessionEntity {
     
     public void setReferenceAnswersJson(String referenceAnswersJson) {
         this.referenceAnswersJson = referenceAnswersJson;
+    }
+
+    public String getReportJson() {
+        return reportJson;
+    }
+
+    public void setReportJson(String reportJson) {
+        this.reportJson = reportJson;
     }
     
     public List<InterviewAnswerEntity> getAnswers() {

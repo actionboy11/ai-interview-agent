@@ -48,6 +48,7 @@ public class InterviewSessionService {
     private final ObjectMapper objectMapper;
     private final InterviewEvaluationTaskPublisher evaluationTaskPublisher;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final MemoryDerivationPublicationService memoryPublication;
 
     /**
      * 创建新的面试会话
@@ -488,6 +489,13 @@ public class InterviewSessionService {
     public InterviewReportDTO generateReport(String sessionId) {
         CachedSession session = getOrRestoreSession(sessionId);
 
+        Optional<InterviewReportDTO> completed = persistenceService.findCompletedReport(sessionId);
+        if (completed.isPresent()) {
+            memoryPublication.publishIfPending(sessionId);
+            sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+            return completed.get();
+        }
+
         if (session.getStatus() != SessionStatus.COMPLETED && session.getStatus() != SessionStatus.EVALUATED) {
             throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "面试尚未完成，无法生成报告");
         }
@@ -511,17 +519,17 @@ public class InterviewSessionService {
             questions
         );
 
-        // 更新 Redis 缓存状态
-        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
-
-        // 保存报告到数据库
-        try {
-            persistenceService.saveReport(sessionId, report);
-        } catch (Exception e) {
-            log.warn("保存报告到数据库失败: {}", e.getMessage());
+        InterviewPersistenceService.CompletionResult result = persistenceService.saveReport(
+            sessionId, report, UUID.randomUUID().toString());
+        if (result == InterviewPersistenceService.CompletionResult.SESSION_MISSING) {
+            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
         }
-
-        return report;
+        memoryPublication.publishIfPending(sessionId);
+        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
+        return result == InterviewPersistenceService.CompletionResult.ALREADY_COMPLETED
+            ? persistenceService.findCompletedReport(sessionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED))
+            : report;
     }
 
     /**

@@ -3,6 +3,7 @@ package interview.guide.modules.ownership;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
@@ -28,7 +29,6 @@ import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRab
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRabbitProducer;
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRetryPolicy;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
-import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
 import interview.guide.modules.interview.listener.EvaluateStreamConsumer;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -135,7 +136,7 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
     var consumer = new InterviewEvaluationRabbitConsumer(sessions, evaluation, interviewPersistence,
         mapper, llm, mock(InterviewEvaluationRabbitProducer.class),
         mock(InterviewEvaluationRetryPolicy.class), cache,
-        mock(AbilityMemoryDerivationTaskPublisher.class));
+        memoryPublication);
     var channel = mock(Channel.class);
     for (String id : List.of(valid.getSessionId(), invalid.getSessionId(), "deleted")) {
       var messageId = UUID.randomUUID();
@@ -162,7 +163,8 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
     when(currentUser.requireUserId()).thenThrow(new AssertionError("Worker must not require request identity"));
     when(evaluation.evaluateInterview(any(), eq(valid.getSessionId()), any(), any()))
         .thenReturn(report(valid.getSessionId()));
-    var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence, mapper, llm, cache);
+    var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
+        mapper, llm, cache, memoryPublication);
     for (String id : List.of(valid.getSessionId(), invalid.getSessionId(), "deleted")) {
       ReflectionTestUtils.invokeMethod(consumer, "processMessage", new StreamMessageId(5, 1),
           Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, id));
@@ -172,6 +174,137 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
     assertThat(sessions.findBySessionId(invalid.getSessionId()).orElseThrow().getOverallScore()).isNull();
     verify(redis, times(3)).streamAck(any(), any(), any());
     verify(evaluation, never()).evaluateInterview(any(), eq(invalid.getSessionId()), any(), any());
+  }
+
+  @Test
+  @DisplayName("Redis 完成报告后发布失败可重投补发且不再调用模型")
+  void redisPublicationFailureRedeliveryDoesNotReevaluate() {
+    var value = session(first);
+    cache.saveSession(value.getSessionId(), "", null, List.of(), 0, SessionStatus.COMPLETED);
+    when(evaluation.evaluateInterview(any(), eq(value.getSessionId()), any(), any()))
+        .thenReturn(report(value.getSessionId()));
+    AtomicInteger publications = new AtomicInteger();
+    doAnswer(invocation -> {
+      var persisted = sessions.findBySessionId(value.getSessionId()).orElseThrow();
+      assertThat(persisted.getStatus()).isEqualTo(InterviewSessionEntity.SessionStatus.EVALUATED);
+      assertThat(persisted.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+      if (publications.getAndIncrement() == 0) {
+        throw new IllegalStateException("Rabbit unavailable");
+      }
+      return null;
+    }).when(memoryPublisher).publish(value.getSessionId());
+    var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
+        mapper, llm, cache, memoryPublication);
+
+    ReflectionTestUtils.invokeMethod(consumer, "processMessage", new StreamMessageId(20, 1),
+        Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, value.getSessionId()));
+    var afterFailure = sessions.findBySessionId(value.getSessionId()).orElseThrow();
+    assertThat(afterFailure.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+    assertThat(afterFailure.getMemoryDerivationStatus()).isEqualTo(AsyncTaskStatus.FAILED);
+    assertThat(cache.getSession(value.getSessionId()).orElseThrow().getStatus())
+        .isEqualTo(SessionStatus.COMPLETED);
+    ReflectionTestUtils.invokeMethod(consumer, "processMessage", new StreamMessageId(21, 1),
+        Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, value.getSessionId(),
+            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, "1"));
+
+    assertThat(publications.get()).isEqualTo(2);
+    assertThat(sessions.findBySessionId(value.getSessionId()).orElseThrow().getEvaluateStatus())
+        .isEqualTo(AsyncTaskStatus.COMPLETED);
+    assertThat(cache.getSession(value.getSessionId()).orElseThrow().getStatus())
+        .isEqualTo(SessionStatus.EVALUATED);
+    verify(evaluation, times(1)).evaluateInterview(any(), eq(value.getSessionId()), any(), any());
+    verify(redis, times(2)).streamAck(any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("Redis 补发达到重试上限后保留待处理消息供重新领取")
+  void redisPublicationFailureAtRetryLimitLeavesMessagePending() {
+    var value = session(first);
+    interviewPersistence.saveReport(value.getSessionId(), report(value.getSessionId()),
+        UUID.randomUUID().toString());
+    doAnswer(invocation -> {
+      var persisted = sessions.findBySessionId(value.getSessionId()).orElseThrow();
+      assertThat(persisted.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+      throw new IllegalStateException("Rabbit unavailable");
+    }).when(memoryPublisher).publish(value.getSessionId());
+    var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
+        mapper, llm, cache, memoryPublication);
+
+    assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(consumer, "processMessage",
+        new StreamMessageId(22, 1),
+        Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, value.getSessionId(),
+            AsyncTaskStreamConstants.FIELD_RETRY_COUNT,
+            String.valueOf(AsyncTaskStreamConstants.MAX_RETRY_COUNT))))
+        .isInstanceOf(BusinessException.class);
+
+    assertThat(sessions.findBySessionId(value.getSessionId()).orElseThrow().getEvaluateStatus())
+        .isEqualTo(AsyncTaskStatus.COMPLETED);
+    verify(redis, never()).streamAck(any(), any(), any());
+    verify(evaluation, never()).evaluateInterview(any(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("同步报告完成后发布派生，重复请求返回已保存报告且不再调用模型")
+  void synchronousReportRepeatDoesNotReevaluate() {
+    var value = session(first);
+    cache.saveSession(value.getSessionId(), "", null, List.of(), 0, SessionStatus.COMPLETED);
+    var expected = new InterviewReportDTO(value.getSessionId(), 2, 80,
+        List.of(new InterviewReportDTO.CategoryScore("ZZZ", "Systems", 90, 1),
+            new InterviewReportDTO.CategoryScore("AAA", "Java", 70, 1)),
+        List.of(new InterviewReportDTO.QuestionEvaluation(0, "Java question", "AAA", "Java",
+                null, 70, "Good answer"),
+            new InterviewReportDTO.QuestionEvaluation(1, "Systems question", "ZZZ", "Systems",
+                null, 90, "Strong answer")),
+        "Good", List.of("Clear"), List.of("More detail"), List.of());
+    when(evaluation.evaluateInterview(any(), eq(value.getSessionId()), any(), any()))
+        .thenReturn(expected);
+    doAnswer(invocation -> {
+      var persisted = sessions.findBySessionId(value.getSessionId()).orElseThrow();
+      assertThat(persisted.getStatus()).isEqualTo(InterviewSessionEntity.SessionStatus.EVALUATED);
+      assertThat(persisted.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+      return null;
+    }).when(memoryPublisher).publish(value.getSessionId());
+
+    assertThat(interviewService.generateReport(value.getSessionId())).isEqualTo(expected);
+    assertThat(interviewService.generateReport(value.getSessionId())).isEqualTo(expected);
+
+    verify(evaluation, times(1)).evaluateInterview(any(), eq(value.getSessionId()), any(), any());
+    verify(memoryPublisher, times(2)).publish(value.getSessionId());
+  }
+
+  @Test
+  @DisplayName("同步报告发布失败后重复请求补发已保存报告且不再调用模型")
+  void synchronousReportPublicationFailureCanRetry() {
+    var value = session(first);
+    cache.saveSession(value.getSessionId(), "", null, List.of(), 0, SessionStatus.COMPLETED);
+    var expected = report(value.getSessionId());
+    when(evaluation.evaluateInterview(any(), eq(value.getSessionId()), any(), any()))
+        .thenReturn(expected);
+    AtomicInteger publications = new AtomicInteger();
+    doAnswer(invocation -> {
+      var persisted = sessions.findBySessionId(value.getSessionId()).orElseThrow();
+      assertThat(persisted.getStatus()).isEqualTo(InterviewSessionEntity.SessionStatus.EVALUATED);
+      assertThat(persisted.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+      if (publications.getAndIncrement() == 0) {
+        throw new IllegalStateException("Rabbit unavailable");
+      }
+      return null;
+    }).when(memoryPublisher).publish(value.getSessionId());
+
+    assertThatThrownBy(() -> interviewService.generateReport(value.getSessionId()))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(sessions.findBySessionId(value.getSessionId()).orElseThrow().getEvaluateStatus())
+        .isEqualTo(AsyncTaskStatus.COMPLETED);
+    assertThat(sessions.findBySessionId(value.getSessionId()).orElseThrow().getMemoryDerivationStatus())
+        .isEqualTo(AsyncTaskStatus.FAILED);
+    assertThat(interviewService.generateReport(value.getSessionId())).isEqualTo(expected);
+
+    assertThat(publications.get()).isEqualTo(2);
+    verify(evaluation, times(1)).evaluateInterview(any(), eq(value.getSessionId()), any(), any());
   }
 
   private InterviewReportDTO report(String sessionId) {

@@ -12,7 +12,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
-import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
+import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import java.util.List;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +40,7 @@ public class InterviewEvaluationRabbitConsumer {
   private final InterviewEvaluationRabbitProducer producer;
   private final InterviewEvaluationRetryPolicy retryPolicy;
   private final InterviewSessionCache sessionCache;
-  private final AbilityMemoryDerivationTaskPublisher memoryPublisher;
+  private final MemoryDerivationPublicationService memoryPublication;
 
   public InterviewEvaluationRabbitConsumer(
       InterviewSessionRepository sessionRepository,
@@ -51,7 +51,7 @@ public class InterviewEvaluationRabbitConsumer {
       InterviewEvaluationRabbitProducer producer,
       InterviewEvaluationRetryPolicy retryPolicy,
       InterviewSessionCache sessionCache,
-      AbilityMemoryDerivationTaskPublisher memoryPublisher
+      MemoryDerivationPublicationService memoryPublication
   ) {
     this.sessionRepository = sessionRepository;
     this.evaluationService = evaluationService;
@@ -61,7 +61,7 @@ public class InterviewEvaluationRabbitConsumer {
     this.producer = producer;
     this.retryPolicy = retryPolicy;
     this.sessionCache = sessionCache;
-    this.memoryPublisher = memoryPublisher;
+    this.memoryPublication = memoryPublication;
   }
 
   @RabbitListener(
@@ -124,9 +124,7 @@ public class InterviewEvaluationRabbitConsumer {
   private void publishCompletedDerivation(InterviewSessionEntity session, long deliveryTag,
       Channel channel) throws Exception {
     try {
-      if (session.getMemoryDerivationStatus() != AsyncTaskStatus.COMPLETED) {
-        memoryPublisher.publish(session.getSessionId());
-      }
+      memoryPublication.publishIfPending(session.getSessionId());
       syncEvaluatedStatusToCache(session);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException failure) {

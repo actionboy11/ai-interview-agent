@@ -4,6 +4,8 @@ import interview.guide.common.async.AbstractStreamConsumer;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
@@ -14,6 +16,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
 import org.springframework.ai.chat.client.ChatClient;
@@ -25,6 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 面试评估 Stream 消费者
@@ -44,6 +48,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final ObjectMapper objectMapper;
     private final LlmProviderRegistry llmProviderRegistry;
     private final InterviewSessionCache sessionCache;
+    private final MemoryDerivationPublicationService memoryPublication;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -52,7 +57,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         InterviewPersistenceService persistenceService,
         ObjectMapper objectMapper,
         LlmProviderRegistry llmProviderRegistry,
-        InterviewSessionCache sessionCache
+        InterviewSessionCache sessionCache,
+        MemoryDerivationPublicationService memoryPublication
     ) {
         super(redisService);
         this.sessionRepository = sessionRepository;
@@ -61,6 +67,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.objectMapper = objectMapper;
         this.llmProviderRegistry = llmProviderRegistry;
         this.sessionCache = sessionCache;
+        this.memoryPublication = memoryPublication;
     }
 
     record EvaluatePayload(String sessionId) {}
@@ -108,8 +115,17 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected boolean shouldSkip(EvaluatePayload payload) {
         return sessionRepository.findBySessionIdWithResume(payload.sessionId())
-            .map(session -> !hasConsistentOwner(session)
-                || session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED)
+            .map(session -> {
+                if (!hasConsistentOwner(session)) {
+                    return true;
+                }
+                if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+                    memoryPublication.publishIfPending(payload.sessionId());
+                    syncEvaluatedStatusToCache(payload.sessionId());
+                    return true;
+                }
+                return false;
+            })
             .orElse(true);
     }
 
@@ -152,12 +168,12 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
-        persistenceService.saveReportInternal(sessionId, report);
+        persistenceService.saveReport(sessionId, report, UUID.randomUUID().toString());
     }
 
     @Override
     protected void markCompleted(EvaluatePayload payload) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.COMPLETED, null);
+        memoryPublication.publishIfPending(payload.sessionId());
         syncEvaluatedStatusToCache(payload.sessionId());
     }
 
@@ -176,29 +192,30 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
     @Override
     protected void markFailed(EvaluatePayload payload, String error) {
+        if (sessionRepository.findBySessionIdWithResume(payload.sessionId())
+            .map(session -> session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED)
+            .orElse(false)) {
+            persistenceService.recordMemoryPublicationFailure(payload.sessionId(), error);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+                "能力派生发布失败，保留 Redis 待处理消息");
+        }
         updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.FAILED, error);
     }
 
     @Override
     protected void retryMessage(EvaluatePayload payload, int retryCount) {
         String sessionId = payload.sessionId();
-        try {
-            Map<String, String> message = Map.of(
-                AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId,
-                AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-            );
-
-            redisService().streamAdd(
-                AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY,
-                message,
-                AsyncTaskStreamConstants.STREAM_MAX_LEN
-            );
-            log.info("评估任务已重新入队: sessionId={}, retryCount={}", sessionId, retryCount);
-
-        } catch (Exception e) {
-            log.error("重试入队失败: sessionId={}, error={}", sessionId, e.getMessage(), e);
-            updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, truncateError("重试入队失败: " + e.getMessage()));
-        }
+        Map<String, String> message = Map.of(
+            AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId,
+            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
+        );
+        // If republishing fails, leave the original pending for Redis reclaim.
+        redisService().streamAdd(
+            AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY,
+            message,
+            AsyncTaskStreamConstants.STREAM_MAX_LEN
+        );
+        log.info("评估任务已重新入队: sessionId={}, retryCount={}", sessionId, retryCount);
     }
 
     /**
