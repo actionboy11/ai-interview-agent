@@ -1,6 +1,7 @@
 package interview.guide.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 import interview.guide.common.config.OwnershipMigrationConfiguration;
@@ -46,7 +47,7 @@ class FlywayBaselineIntegrationTest {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -56,7 +57,8 @@ class FlywayBaselineIntegrationTest {
         "llm_provider_config", "llm_global_setting", "voice_interview_sessions",
         "voice_interview_messages", "voice_interview_evaluations", "voice_evaluation_dead_letters",
         "agent_evaluation_runs", "agent_evaluation_cases", "agent_evaluation_stages",
-        "ai_call_audits", "vector_store", "users", "registration_invites");
+        "ai_call_audits", "vector_store", "users", "registration_invites",
+        "user_ability_profiles", "user_ability_evidence", "ability_profile_proposals");
     assertThat(jdbc.queryForObject("select count(*) from pg_extension where extname = 'vector'",
         Integer.class)).isEqualTo(1);
     assertThat(jdbc.queryForObject("""
@@ -79,7 +81,73 @@ class FlywayBaselineIntegrationTest {
             reference.queryForList(BUSINESS_CONSTRAINTS, String.class));
     assertThat(jdbc.queryForList(BUSINESS_INDEXES))
         .containsExactlyInAnyOrderElementsOf(reference.queryForList(BUSINESS_INDEXES));
+    assertAbilityMemoryConstraints(jdbc);
     assertThat(flyway.migrate().migrationsExecuted).isZero();
+  }
+
+  private void assertAbilityMemoryConstraints(JdbcTemplate jdbc) {
+    jdbc.update("""
+        insert into users (id, username, normalized_username, password_hash, display_name,
+          role, status, must_change_password, created_at, updated_at, version)
+        values ('11111111-1111-1111-1111-111111111111', 'Alice', 'alice', 'hash', 'Alice',
+          'USER', 'ACTIVE', false, now(), now(), 0)
+        """);
+    jdbc.update("""
+        insert into users (id, username, normalized_username, password_hash, display_name,
+          role, status, must_change_password, created_at, updated_at, version)
+        values ('22222222-2222-2222-2222-222222222222', 'Bob', 'bob', 'hash', 'Bob',
+          'USER', 'ACTIVE', false, now(), now(), 0)
+        """);
+    String first = "11111111-1111-1111-1111-111111111111";
+    String second = "22222222-2222-2222-2222-222222222222";
+    String profile = """
+        insert into user_ability_profiles (user_id, skill_id, category_key, level,
+          score, confidence, confirmed_evidence_count, status, version)
+        values (?::uuid, 'java-backend', 'JAVA', 'COMPETENT', ?, 0.5, 1, 'ACTIVE', 0)
+        """;
+    jdbc.update(profile, first, 70);
+    jdbc.update(profile, second, 70);
+    assertThatThrownBy(() -> jdbc.update(profile, first, 70))
+        .hasMessageContaining("uk_ability_profile_owner_skill_category");
+    assertThatThrownBy(() -> jdbc.update(profile, first, 101))
+        .hasMessageContaining("check constraint");
+
+    jdbc.update("""
+        insert into interview_sessions (session_id, owner_user_id, created_at)
+        values ('memory-session', ?::uuid, now())
+        """, first);
+    Long sessionId = jdbc.queryForObject("""
+        select id from interview_sessions where session_id = 'memory-session'
+        """, Long.class);
+    String proposal = """
+        insert into ability_profile_proposals (user_id, interview_session_id, skill_id,
+          category_key, proposed_level, proposed_score, status, created_at, version)
+        values (?::uuid, ?, 'java-backend', 'JAVA', 'COMPETENT', 70, 'PROPOSED', now(), 0)
+        """;
+    jdbc.update(proposal, first, sessionId);
+    assertThatThrownBy(() -> jdbc.update(proposal, first, sessionId))
+        .hasMessageContaining("uk_ability_proposal_session_category");
+    Long proposalId = jdbc.queryForObject("""
+        select id from ability_profile_proposals where interview_session_id = ?
+        """, Long.class, sessionId);
+    jdbc.update("""
+        insert into interview_answers (session_id, question_index, category_key, answered_at)
+        values (?, 0, 'JAVA', now())
+        """, sessionId);
+    Long answerId = jdbc.queryForObject("""
+        select id from interview_answers where session_id = ?
+        """, Long.class, sessionId);
+    String evidence = """
+        insert into user_ability_evidence (user_id, interview_session_id, interview_answer_id,
+          proposal_id, skill_id, category_key, question_score, occurred_at)
+        values (?::uuid, ?, ?, ?, 'java-backend', 'JAVA', 70, now())
+        """;
+    jdbc.update(evidence, first, sessionId, answerId, proposalId);
+    assertThatThrownBy(() -> jdbc.update(evidence, first, sessionId, answerId, proposalId))
+        .hasMessageContaining("uk_ability_evidence_answer");
+    assertThat(jdbc.queryForObject("""
+        select count(*) from user_ability_evidence where proposal_id = ?
+        """, Integer.class, proposalId)).isOne();
   }
 
   // Derive the reference from existing mappings, independently of the migration under test.
@@ -146,8 +214,8 @@ class FlywayBaselineIntegrationTest {
           'ADMIN', 'ACTIVE', true, now(), now(), 0)
         """);
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
@@ -175,7 +243,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("4");
+          .isEqualTo("5");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(
@@ -231,7 +299,7 @@ class FlywayBaselineIntegrationTest {
         sources.addAnnotatedClass(Class.forName(className));
       }
       try (var sessionFactory = sources.buildMetadata().buildSessionFactory()) {
-        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(23);
+        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(26);
       }
     } finally {
       StandardServiceRegistryBuilder.destroy(registry);
