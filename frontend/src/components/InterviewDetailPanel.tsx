@@ -1,7 +1,12 @@
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {getScoreColor} from '../utils/score';
 import type {InterviewDetail} from '../api/history';
+import {memoryApi} from '../api/memory';
+import {getErrorMessage} from '../api/request';
+import type {AbilityProposal} from '../types/memory';
+import {RefreshCw} from 'lucide-react';
+import AbilityProposalCard from './AbilityProposalCard';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -55,6 +60,8 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
         strokeDashoffset={strokeDashoffset}
       />
 
+      <AbilityProposalsSection sessionId={interview.sessionId} evaluationStatus={interview.evaluateStatus} evaluationError={interview.evaluateError} />
+
       {/* 表现优势 */}
       {interview.strengths && interview.strengths.length > 0 && (
         <StrengthsSection strengths={interview.strengths} />
@@ -72,6 +79,68 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
         toggleQuestion={toggleQuestion}
       />
     </motion.div>
+  );
+}
+
+function AbilityProposalsSection({ sessionId, evaluationStatus, evaluationError }: {
+  sessionId: string;
+  evaluationStatus?: string;
+  evaluationError?: string;
+}) {
+  const [proposals, setProposals] = useState<AbilityProposal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const refresh = async () => {
+    const items = await memoryApi.proposals(sessionId);
+    setProposals(items.filter(item => item.interviewSessionId === sessionId));
+    setError('');
+  };
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setLoading(true);
+    setProposals([]);
+    setError('');
+    const poll = async () => {
+      try {
+        const items = await memoryApi.proposals(sessionId);
+        if (!active) return;
+        setProposals(items.filter(item => item.interviewSessionId === sessionId));
+        setError('');
+      } catch (err) {
+        if (active) setError(getErrorMessage(err));
+      } finally {
+        if (active) {
+          setLoading(false);
+          if (evaluationStatus === 'COMPLETED') timer = setTimeout(poll, 5000);
+        }
+      }
+    };
+    void poll();
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [sessionId, evaluationStatus]);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">能力画像建议</h3>
+        <button type="button" onClick={() => void refresh().catch(err => setError(getErrorMessage(err)))} className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"><RefreshCw className="h-4 w-4" />刷新建议</button>
+      </div>
+      {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">加载建议失败：{error}</p>}
+      {loading && <p className="text-sm text-slate-500">正在加载能力建议…</p>}
+      {!loading && !error && proposals.length === 0 && (
+        <p className="rounded-xl bg-white p-4 text-sm text-slate-500 dark:bg-slate-800">
+          {evaluationStatus === 'FAILED' ? `本次面试评估失败，暂无能力建议。${evaluationError ?? ''}`
+            : evaluationStatus === 'PENDING' || evaluationStatus === 'PROCESSING' ? '面试评估进行中，完成后会生成能力建议。'
+              : '暂无能力建议。评估完成后可能仍在异步生成；页面会自动刷新，也可手动重试。'}
+        </p>
+      )}
+      {proposals.filter(item => item.interviewSessionId === sessionId).map(item => (
+        <AbilityProposalCard key={item.id} proposal={item} sessionId={sessionId} onDecision={refresh} />
+      ))}
+    </section>
   );
 }
 

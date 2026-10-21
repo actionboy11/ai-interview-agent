@@ -28,6 +28,7 @@ const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPane
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const InviteRegisterPage = lazy(() => import('./pages/InviteRegisterPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const AbilityProfilePage = lazy(() => import('./pages/AbilityProfilePage'));
 
 // Loading component
 const Loading = () => (
@@ -199,6 +200,8 @@ function App() {
             {/* 面试记录列表 */}
             <Route path="interviews" element={<InterviewHistoryWrapper />} />
 
+            <Route path={ROUTES.abilityProfile} element={<AbilityProfilePage />} />
+
             {/* 面试详情报告 */}
             <Route path="interviews/:sessionId" element={<InterviewDetailPageWrapper />} />
 
@@ -281,6 +284,10 @@ function InterviewDetailPageWrapper() {
       return;
     }
 
+    setLoading(true);
+    setError('');
+    setInterview(null);
+
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -310,7 +317,7 @@ function InterviewDetailPageWrapper() {
     };
   }, [sessionId, navigate]);
 
-  if (loading) {
+  if (loading || (interview && interview.sessionId !== sessionId)) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
@@ -349,7 +356,7 @@ function InterviewDetailPageWrapper() {
           面试详情 #{sessionId!.slice(-8)}
         </h1>
       </div>
-      <InterviewDetailPanel interview={interview} />
+      <InterviewDetailPanel key={sessionId} interview={interview} />
     </div>
   );
 }
