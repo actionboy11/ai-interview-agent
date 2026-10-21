@@ -27,6 +27,17 @@ import interview.guide.modules.memory.repository.UserAbilityProfileRepository;
 import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.memory.service.AbilityScorePolicy;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
+import interview.guide.modules.interview.planning.QuestionPlanningService;
+import interview.guide.modules.interview.planning.model.PlanningMode;
+import interview.guide.modules.interview.planning.model.QuestionPlan;
+import interview.guide.modules.interview.planning.model.QuestionPurpose;
+import interview.guide.modules.interview.planning.model.QuestionSlot;
+import interview.guide.modules.interview.planning.model.QuestionSourceMode;
+import interview.guide.modules.interview.planning.service.InterviewQuestionPlanPersistenceService;
+import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
+import interview.guide.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
+import interview.guide.modules.interview.skill.InterviewSkillService.SkillDTO;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
@@ -49,6 +60,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -66,6 +78,7 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Import({ResumePersistenceService.class, ResumeHistoryService.class, ResumeDeleteService.class,
     ResumeUploadService.class, InterviewPersistenceService.class, InterviewSessionService.class,
+    InterviewQuestionPlanPersistenceService.class,
     MemoryDerivationPublicationService.class, AbilityMemoryDeletionService.class,
     AbilityScorePolicy.class,
     InterviewHistoryService.class, InterviewSessionCache.class, FileStorageService.class,
@@ -77,7 +90,8 @@ import tools.jackson.databind.ObjectMapper;
 abstract class WorkflowOwnershipTestSupport {
   @Configuration(proxyBeanMethods = false)
   @EnableJpaRepositories(basePackageClasses = {ResumeAnalysisDeadLetterRepository.class,
-      InterviewEvaluationDeadLetterRepository.class, UserAbilityProfileRepository.class})
+      InterviewEvaluationDeadLetterRepository.class, UserAbilityProfileRepository.class,
+      InterviewQuestionPlanRepository.class})
   static class DeadLetterConfiguration {
   }
 
@@ -109,6 +123,8 @@ abstract class WorkflowOwnershipTestSupport {
   @MockitoBean InterviewEvaluationTaskPublisher interviewPublisher;
   @MockitoBean AbilityMemoryDerivationTaskPublisher memoryPublisher;
   @MockitoBean InterviewQuestionService questions;
+  @MockitoBean QuestionPlanningService planning;
+  @MockitoBean AdaptiveAllocationPolicy allocation;
   @MockitoBean AnswerEvaluationService evaluation;
   @MockitoBean LlmProviderRegistry llm;
   UserEntity first;
@@ -120,6 +136,15 @@ abstract class WorkflowOwnershipTestSupport {
     first = users.saveAndFlush(user());
     second = users.saveAndFlush(user());
     when(currentUser.requireUserId()).thenReturn(first.getId());
+    when(questions.resolveSkillForPlanning(any(), any(), any())).thenReturn(new SkillDTO(
+        "java", "Java", "", List.of(new SkillCategoryDTO("java", "Java", "CORE", null, false)),
+        true, null, null, null));
+    when(planning.plan(any())).thenReturn(new QuestionPlan(1, PlanningMode.FIXED,
+        List.of(new QuestionSlot("slot-01", "java", QuestionPurpose.BASELINE, "mid",
+            QuestionSourceMode.DIRECTION, List.of(), List.of(), null)), null));
+    when(questions.generateFromPlan(any(), any(), any(), any(), any())).thenReturn(
+        List.of(interview.guide.modules.interview.model.InterviewQuestionDTO.create(0,
+            "Question", "java", "Java")));
     cachedValues = new HashMap<>();
     when(redis.get(any())).thenAnswer(invocation -> cachedValues.get(invocation.getArgument(0)));
     when(redis.delete(any())).thenAnswer(invocation -> cachedValues.remove(invocation.getArgument(0)) != null);

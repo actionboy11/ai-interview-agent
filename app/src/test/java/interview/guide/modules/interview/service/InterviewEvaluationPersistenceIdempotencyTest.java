@@ -49,6 +49,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
     InterviewSessionEntity session = new InterviewSessionEntity();
     session.setOwner(UserEntity.builder().id(java.util.UUID.randomUUID()).build());
     session.setSessionId("session-42");
+    session.setQuestionsJson("[]");
     when(sessionRepository.findBySessionIdWithResume("session-42"))
         .thenReturn(Optional.of(session));
 
@@ -69,6 +70,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
     InterviewSessionEntity session = new InterviewSessionEntity();
     session.setOwner(UserEntity.builder().id(java.util.UUID.randomUUID()).build());
     session.setSessionId("session-42");
+    session.setQuestionsJson("[]");
     session.setEvaluationMessageId("message-1");
     when(sessionRepository.findBySessionIdWithResume("session-42"))
         .thenReturn(Optional.of(session));

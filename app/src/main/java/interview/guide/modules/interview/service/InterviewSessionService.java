@@ -5,6 +5,7 @@ import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
@@ -17,6 +18,13 @@ import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.model.SubmitAnswerResponse;
+import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
+import interview.guide.modules.interview.planning.QuestionPlanningService;
+import interview.guide.modules.interview.planning.model.PlanningMode;
+import interview.guide.modules.interview.planning.model.QuestionPlan;
+import interview.guide.modules.interview.planning.model.QuestionPlanningCommand;
+import interview.guide.modules.interview.planning.service.InterviewQuestionPlanPersistenceService;
+import interview.guide.modules.interview.skill.InterviewSkillService.SkillDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 面试会话管理服务
@@ -49,6 +59,10 @@ public class InterviewSessionService {
     private final InterviewEvaluationTaskPublisher evaluationTaskPublisher;
     private final LlmProviderRegistry llmProviderRegistry;
     private final MemoryDerivationPublicationService memoryPublication;
+    private final CurrentUserProvider currentUser;
+    private final QuestionPlanningService planningService;
+    private final AdaptiveAllocationPolicy allocationPolicy;
+    private final InterviewQuestionPlanPersistenceService planPersistence;
 
     /**
      * 创建新的面试会话
@@ -56,8 +70,10 @@ public class InterviewSessionService {
      * 前端应该先调用 findUnfinishedSession 检查，或者使用 forceCreate 参数强制创建
      */
     public InterviewSessionDTO createSession(CreateInterviewRequest request) {
+        UUID ownerId = currentUser.requireUserId();
+        String resumeText = request.resumeText();
         if (request.resumeId() != null) {
-            persistenceService.requireOwnedResume(request.resumeId());
+            resumeText = persistenceService.requireOwnedResume(request.resumeId()).getResumeText();
         }
         // 如果指定了resumeId且未强制创建，检查是否有未完成的会话
         if (request.resumeId() != null && !Boolean.TRUE.equals(request.forceCreate())) {
@@ -79,44 +95,53 @@ public class InterviewSessionService {
         // 获取历史问题（通用模式按 skillId 查询，有简历时按 resumeId + skillId 精确匹配）
         List<HistoricalQuestion> historicalQuestions =
             persistenceService.getHistoricalQuestions(skillId, request.resumeId());
-
-        // 基于 Skill 生成面试问题
-        List<InterviewQuestionDTO> questions = questionService.generateQuestionsBySkill(
-            request.llmProvider(),
-            skillId,
-            difficulty,
-            request.resumeText(),
-            request.questionCount(),
-            historicalQuestions,
-            request.customCategories(),
-            request.jdText()
-        );
-
-        // 保存到 Redis 缓存
-        sessionCache.saveSession(
-            sessionId,
-            request.resumeText() != null ? request.resumeText() : "",
-            request.resumeId(),
-            questions,
-            0,
-            SessionStatus.CREATED
-        );
-
-        // 保存到数据库。数据库是真相源，写失败必须回滚已写入的缓存并报错，
-        // 否则会留下「缓存有、数据库无」的会话，缓存过期后进度彻底丢失。
-        try {
-            persistenceService.saveSession(sessionId, request.resumeId(),
-                questions.size(), questions, request.llmProvider(), skillId, difficulty);
-        } catch (Exception e) {
-            sessionCache.deleteSession(sessionId);
-            log.error("保存面试会话到数据库失败，已回滚缓存: sessionId={}", sessionId, e);
-            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_SAVE_FAILED,
-                "保存面试会话失败，请稍后重试");
+        SkillDTO skill = questionService.resolveSkillForPlanning(skillId,
+            request.customCategories(), request.jdText());
+        Set<String> grounded = Set.of();
+        if (resumeText != null) {
+                String text = resumeText.toLowerCase(java.util.Locale.ROOT);
+                grounded = skill.categories().stream()
+                    .filter(category -> category.label() != null && category.label().length() >= 3
+                        && text.contains(category.label().toLowerCase(java.util.Locale.ROOT)))
+                    .map(category -> category.key()).collect(Collectors.toSet());
         }
+        Map<String, Integer> recentCoverage = historicalQuestions.stream()
+            .filter(question -> question.type() != null)
+            .collect(Collectors.toMap(HistoricalQuestion::type, question -> 1, Integer::sum));
+        QuestionPlanningCommand command = new QuestionPlanningCommand(skillId, skill.categories(),
+            request.questionCount(), difficulty, resumeText != null
+                && !resumeText.isBlank(), recentCoverage, historicalQuestions, grounded);
+        QuestionPlan plan = planningService.plan(command);
+        planPersistence.createShell(sessionId, ownerId, request.resumeId(),
+            request.llmProvider(), skillId, difficulty, plan);
+        List<InterviewQuestionDTO> questions;
+        String generationResumeText = resumeText;
+        try {
+            try {
+                questions = questionService.generateFromPlan(request.llmProvider(), skill,
+                    difficulty, generationResumeText, plan);
+            } catch (BusinessException generationFailure) {
+                if (plan.mode() != PlanningMode.ADAPTIVE) {
+                    throw generationFailure;
+                }
+                QuestionPlan fallback = allocationPolicy.fallback(command,
+                    "INVALID_ADAPTIVE_OUTPUT");
+                planPersistence.appendFallback(sessionId, ownerId, fallback);
+                questions = questionService.generateFromPlan(request.llmProvider(), skill,
+                    difficulty, generationResumeText, fallback);
+            }
+            planPersistence.finish(sessionId, ownerId, questions);
+        } catch (RuntimeException failure) {
+            planPersistence.discardShell(sessionId, ownerId);
+            throw failure;
+        }
+        sessionCache.saveSession(sessionId,
+            generationResumeText != null ? generationResumeText : "",
+            request.resumeId(), questions, 0, SessionStatus.CREATED);
 
         return new InterviewSessionDTO(
             sessionId,
-            request.resumeText() != null ? request.resumeText() : "",
+            generationResumeText != null ? generationResumeText : "",
             questions.size(),
             0,
             questions,

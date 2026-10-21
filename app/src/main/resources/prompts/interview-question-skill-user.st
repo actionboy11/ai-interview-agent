@@ -9,6 +9,8 @@
 {skillName}（{skillDescription}）
 
 ## 问题分布要求
+{slotSection}
+
 | 方向 | 数量 | 说明 |
 |------|------|------|
 {allocationTable}
@@ -25,6 +27,7 @@
 
 ## 输出要求
 - questions 数组必须包含恰好 {questionCount} 个元素，不多不少
+- 若提供槽位表，每个元素必须原样返回一个唯一 slotId，type 必须等于该槽位的 categoryKey
 - 每个主问题必须包含 topicSummary 字段：10 字以内的知识点摘要（用于历史去重），格式示例：
   - "Redis RDB/AOF 持久化对比"
   - "MySQL 索引失效场景"

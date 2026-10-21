@@ -158,6 +158,7 @@ class StableCategoryEvaluationTest {
     InterviewSessionEntity session = new InterviewSessionEntity();
     session.setSessionId("session");
     session.setSkillId("java-backend");
+    session.setQuestionsJson("[]");
     session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     when(sessions.findBySessionIdWithResume("session")).thenReturn(Optional.of(session));
     when(answers.findBySession_SessionIdOrderByQuestionIndex("session")).thenReturn(List.of());

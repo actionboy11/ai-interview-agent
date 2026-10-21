@@ -401,12 +401,15 @@ public class InterviewPersistenceService {
 
     public Optional<InterviewSessionEntity> findBySessionId(String sessionId) {
         return sessionRepository.findByOwnerIdAndSessionId(currentUser.requireUserId(), sessionId)
+            .filter(session -> session.getQuestionsJson() != null)
             .map(this::validateOwnership);
     }
 
     /** Worker-only lookup. Validate the persisted graph before any external processing. */
     public Optional<InterviewSessionEntity> findBySessionIdInternal(String sessionId) {
-        return sessionRepository.findBySessionIdWithResume(sessionId).map(this::validateOwnership);
+        return sessionRepository.findBySessionIdWithResume(sessionId)
+            .filter(session -> session.getQuestionsJson() != null)
+            .map(this::validateOwnership);
     }
 
     private InterviewSessionEntity validateOwnership(InterviewSessionEntity session) {
@@ -437,7 +440,9 @@ public class InterviewPersistenceService {
      */
     public List<InterviewSessionEntity> findByResumeId(Long resumeId) {
         requireOwnedResume(resumeId);
-        return sessionRepository.findByOwnerIdAndResumeIdOrderByCreatedAtDesc(currentUser.requireUserId(), resumeId);
+        return sessionRepository.findByOwnerIdAndResumeIdOrderByCreatedAtDesc(
+            currentUser.requireUserId(), resumeId).stream()
+            .filter(session -> session.getQuestionsJson() != null).toList();
     }
 
     /**
@@ -445,7 +450,8 @@ public class InterviewPersistenceService {
      */
     public List<InterviewSessionEntity> findAll() {
         return sessionRepository.findByOwnerIdOrderByCreatedAtDesc(currentUser.requireUserId())
-            .stream().filter(this::hasConsistentOwner).toList();
+            .stream().filter(session -> session.getQuestionsJson() != null)
+            .filter(this::hasConsistentOwner).toList();
     }
     
     /**
@@ -496,7 +502,8 @@ public class InterviewPersistenceService {
             InterviewSessionEntity.SessionStatus.IN_PROGRESS
         );
         return sessionRepository.findFirstByOwnerIdAndResumeIdAndStatusInOrderByCreatedAtDesc(
-            currentUser.requireUserId(), resumeId, unfinishedStatuses).map(this::validateOwnership);
+            currentUser.requireUserId(), resumeId, unfinishedStatuses)
+            .filter(session -> session.getQuestionsJson() != null).map(this::validateOwnership);
     }
 
     /**
@@ -506,7 +513,7 @@ public class InterviewPersistenceService {
         return sessionRepository.findByStatusInAndCreatedAtBefore(
             List.of(InterviewSessionEntity.SessionStatus.CREATED,
                     InterviewSessionEntity.SessionStatus.IN_PROGRESS),
-            before);
+            before).stream().filter(session -> session.getQuestionsJson() != null).toList();
     }
     
     /**

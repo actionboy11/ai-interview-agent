@@ -2,6 +2,7 @@ package interview.guide.modules.interview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.interview.planning.model.InterviewQuestionPlanEntity;
 import interview.guide.modules.resume.model.ResumeEntity;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -118,6 +119,9 @@ public class InterviewSessionEntity {
     // 面试答案记录
     @OneToMany(mappedBy = "session", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<InterviewAnswerEntity> answers = new ArrayList<>();
+
+    @OneToMany(mappedBy = "session", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<InterviewQuestionPlanEntity> questionPlans = new ArrayList<>();
     
     // 创建时间
     @Column(nullable = false)

@@ -47,7 +47,7 @@ class FlywayBaselineIntegrationTest {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -58,7 +58,8 @@ class FlywayBaselineIntegrationTest {
         "voice_interview_messages", "voice_interview_evaluations", "voice_evaluation_dead_letters",
         "agent_evaluation_runs", "agent_evaluation_cases", "agent_evaluation_stages",
         "ai_call_audits", "vector_store", "users", "registration_invites",
-        "user_ability_profiles", "user_ability_evidence", "ability_profile_proposals");
+        "user_ability_profiles", "user_ability_evidence", "ability_profile_proposals",
+        "interview_question_plans");
     assertThat(jdbc.queryForObject("select count(*) from pg_extension where extname = 'vector'",
         Integer.class)).isEqualTo(1);
     assertThat(jdbc.queryForObject("""
@@ -208,7 +209,8 @@ class FlywayBaselineIntegrationTest {
       join pg_namespace n on n.oid = t.relnamespace
       where n.nspname = 'public' and t.relname not in ('flyway_schema_history', 'vector_store')
       and c.conname not in ('fk_ability_proposal_owner_session',
-        'fk_ability_evidence_answer_scope', 'fk_ability_evidence_proposal_scope')
+        'fk_ability_evidence_answer_scope', 'fk_ability_evidence_proposal_scope',
+        'fk_question_plan_session_owner')
       """;
 
   private static final String BUSINESS_INDEXES = """
@@ -260,8 +262,8 @@ class FlywayBaselineIntegrationTest {
           'ADMIN', 'ACTIVE', true, now(), now(), 0)
         """);
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
@@ -289,7 +291,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("9");
+          .isEqualTo("10");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(
@@ -345,7 +347,7 @@ class FlywayBaselineIntegrationTest {
         sources.addAnnotatedClass(Class.forName(className));
       }
       try (var sessionFactory = sources.buildMetadata().buildSessionFactory()) {
-        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(26);
+        assertThat(sessionFactory.getMetamodel().getEntities()).hasSize(27);
       }
     } finally {
       StandardServiceRegistryBuilder.destroy(registry);
