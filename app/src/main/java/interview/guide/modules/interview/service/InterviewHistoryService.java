@@ -107,6 +107,8 @@ public class InterviewHistoryService {
                         question.questionIndex(),
                         question.question(),
                         question.category(),
+                        question.type(),
+                        question.category(),
                         null,  // userAnswer
                         question.score() != null ? question.score() : 0,  // score
                         question.feedback(),  // feedback

@@ -4,6 +4,7 @@ import interview.guide.common.ai.StructuredOutputInvoker;
 import interview.guide.common.evaluation.EvaluationReport.CategoryScore;
 import interview.guide.common.evaluation.EvaluationReport.QuestionEvaluation;
 import interview.guide.common.evaluation.EvaluationReport.ReferenceAnswer;
+import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,8 +64,6 @@ public class UnifiedEvaluationService {
     ) {}
 
     private record BatchResult(
-        int startIndex,
-        int endIndex,
         BatchReportDTO report
     ) {}
 
@@ -129,7 +128,7 @@ public class UnifiedEvaluationService {
         );
 
         // 合并批次结果
-        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults, qaRecords);
+        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults);
         String fallbackFeedback = mergeOverallFeedback(batchResults);
         List<String> fallbackStrengths = mergeListItems(batchResults, true);
         List<String> fallbackImprovements = mergeListItems(batchResults, false);
@@ -157,7 +156,7 @@ public class UnifiedEvaluationService {
             int end = Math.min(start + evaluationBatchSize, qaRecords.size());
             List<QaRecord> batch = qaRecords.subList(start, end);
             BatchReportDTO report = evaluateBatch(chatClient, sessionId, resumeContext, referenceContext, batch);
-            results.add(new BatchResult(start, end, report));
+            results.add(new BatchResult(report));
         }
         return results;
     }
@@ -176,59 +175,73 @@ public class UnifiedEvaluationService {
         String userPrompt = userPromptTemplate.render(variables);
 
         String systemPromptWithFormat = systemPrompt + "\n\n" + outputConverter.getFormat();
-        try {
-            return structuredOutputInvoker.invoke(
-                chatClient, systemPromptWithFormat, userPrompt, outputConverter,
-                ErrorCode.INTERVIEW_EVALUATION_FAILED, "批次评估失败：", "批次评估", log
-            );
-        } catch (Exception e) {
-            log.error("批次评估失败: sessionId={}, batchSize={}, error={}",
-                sessionId, batch.size(), e.getMessage(), e);
-            // 返回空报告，让合并逻辑用零分兜底
-            return null;
-        }
+        BatchReportDTO report = structuredOutputInvoker.invoke(
+            chatClient, systemPromptWithFormat, userPrompt, outputConverter,
+            ErrorCode.INTERVIEW_EVALUATION_FAILED, "批次评估失败：", "批次评估", log
+        );
+        return validateBatchReport(sessionId, batch, report);
     }
 
     private String buildQARecords(List<QaRecord> batch) {
         StringBuilder sb = new StringBuilder();
         for (QaRecord q : batch) {
-            sb.append(String.format("问题%d [categoryKey=%s, 类别=%s]: %s\n",
-                q.questionIndex() + 1, q.categoryKey(), q.categoryLabel(), q.question()));
+            sb.append(String.format("问题%d [questionIndex=%d, categoryKey=%s, 类别=%s]: %s\n",
+                q.questionIndex() + 1, q.questionIndex(), q.categoryKey(),
+                q.categoryLabel(), q.question()));
             sb.append(String.format("回答: %s\n\n",
                 q.userAnswer() != null ? q.userAnswer() : "(未回答)"));
         }
         return sb.toString();
     }
 
-    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<BatchResult> batchResults,
-                                                            List<QaRecord> qaRecords) {
-        List<QuestionEvalDTO> merged = new ArrayList<>();
-        for (BatchResult result : batchResults) {
-            int expectedSize = result.endIndex() - result.startIndex();
-            List<QuestionEvalDTO> current =
-                result.report() != null && result.report().questionEvaluations() != null
-                    ? result.report().questionEvaluations()
-                    : List.of();
-            for (int i = 0; i < expectedSize; i++) {
-                QaRecord question = qaRecords.get(result.startIndex() + i);
-                QuestionEvalDTO returned = i < current.size() ? current.get(i) : null;
-                if (returned != null && returned.questionIndex() == question.questionIndex()
-                    && question.categoryKey().equals(returned.categoryKey())) {
-                    merged.add(returned);
-                } else {
-                    if (returned != null) {
-                        log.warn("评估结果题号或类别键不匹配: expectedIndex={}, expectedKey={}, returnedIndex={}, returnedKey={}",
-                            question.questionIndex(), question.categoryKey(),
-                            returned.questionIndex(), returned.categoryKey());
-                    }
-                    merged.add(new QuestionEvalDTO(
-                        question.questionIndex(), question.categoryKey(), 0,
-                        "该题未成功生成评估结果，系统按 0 分处理。", "", List.of()
-                    ));
-                }
+    private BatchReportDTO validateBatchReport(String sessionId, List<QaRecord> batch,
+                                                BatchReportDTO report) {
+        if (report == null || report.questionEvaluations() == null) {
+            throw invalidBatch(sessionId, "缺少逐题评估");
+        }
+        Map<Integer, QaRecord> expected = new HashMap<>();
+        for (QaRecord question : batch) {
+            if (expected.putIfAbsent(question.questionIndex(), question) != null) {
+                throw invalidBatch(sessionId, "会话中存在重复 questionIndex");
             }
         }
-        return merged;
+        Map<Integer, QuestionEvalDTO> returnedByIndex = new HashMap<>();
+        for (QuestionEvalDTO evaluation : report.questionEvaluations()) {
+            if (evaluation == null) {
+                throw invalidBatch(sessionId, "逐题评估为空");
+            }
+            QaRecord question = expected.get(evaluation.questionIndex());
+            if (question == null) {
+                throw invalidBatch(sessionId, "返回未知 questionIndex=" + evaluation.questionIndex());
+            }
+            if (!question.categoryKey().equals(evaluation.categoryKey())) {
+                throw invalidBatch(sessionId, "questionIndex=" + evaluation.questionIndex()
+                    + " 的 categoryKey 不匹配");
+            }
+            if (returnedByIndex.putIfAbsent(evaluation.questionIndex(), evaluation) != null) {
+                throw invalidBatch(sessionId, "返回重复 questionIndex=" + evaluation.questionIndex());
+            }
+        }
+        if (returnedByIndex.size() != batch.size()) {
+            throw invalidBatch(sessionId, "缺少 questionIndex 的评估");
+        }
+        List<QuestionEvalDTO> ordered = batch.stream()
+            .map(question -> returnedByIndex.get(question.questionIndex()))
+            .toList();
+        return new BatchReportDTO(report.overallScore(), report.overallFeedback(),
+            report.strengths(), report.improvements(), ordered);
+    }
+
+    private BusinessException invalidBatch(String sessionId, String reason) {
+        log.warn("拒绝题目身份不匹配的评估结果: sessionId={}, reason={}", sessionId, reason);
+        return new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED,
+            "批次评估结果与会话问题不一致: " + reason);
+    }
+
+    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<BatchResult> batchResults) {
+        return batchResults.stream()
+            .flatMap(result -> result.report().questionEvaluations().stream())
+            .toList();
     }
 
     private String mergeOverallFeedback(List<BatchResult> batchResults) {

@@ -30,6 +30,8 @@ public record InterviewDetailDTO(
         Integer questionIndex,
         String question,
         String category,
+        String categoryKey,
+        String categoryLabel,
         String userAnswer,
         Integer score,
         String feedback,

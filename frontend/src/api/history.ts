@@ -58,6 +58,8 @@ export interface AnswerItem {
   questionIndex: number;
   question: string;
   category: string;
+  categoryKey?: string;
+  categoryLabel?: string;
   userAnswer: string;
   score: number;
   feedback: string;

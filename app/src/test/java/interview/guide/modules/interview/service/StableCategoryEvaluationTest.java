@@ -1,6 +1,7 @@
 package interview.guide.modules.interview.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -12,6 +13,8 @@ import interview.guide.common.evaluation.EvaluationReport;
 import interview.guide.common.evaluation.InterviewEvaluationProperties;
 import interview.guide.common.evaluation.QaRecord;
 import interview.guide.common.evaluation.UnifiedEvaluationService;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.infrastructure.mapper.InterviewMapper;
 import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
@@ -24,10 +27,12 @@ import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.skill.InterviewSkillService;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.mockito.ArgumentCaptor;
+import org.mapstruct.factory.Mappers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -40,12 +45,14 @@ class StableCategoryEvaluationTest {
   @DisplayName("稳定类别键贯穿题目、通用评估、报告和答案实体")
   void keepsCategoryKeyWhenDisplayLabelChanges() throws Exception {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
+    List<String> batchPrompts = new ArrayList<>();
     when(invoker.invoke(any(), any(), any(), any(), any(), any(), any(), any()))
         .thenAnswer(call -> {
           String context = call.getArgument(6);
           if ("总结评估".equals(context)) {
             return construct("SummaryDTO", "总结", List.of(), List.of());
           }
+          batchPrompts.add(call.getArgument(2));
           return construct("BatchReportDTO", 83, "好", List.of(), List.of(),
               List.of(construct("QuestionEvalDTO", 0, "MYSQL", 83, "准确", "参考", List.of())));
         });
@@ -61,13 +68,15 @@ class StableCategoryEvaluationTest {
     assertThat(report.questionDetails().getFirst().categoryLabel()).isEqualTo("数据库");
     assertThat(report.categoryScores().getFirst().categoryKey()).isEqualTo("MYSQL");
     assertThat(report.categoryScores().getFirst().categoryLabel()).isEqualTo("数据库");
+    assertThat(report.questionDetails().getFirst().score()).isEqualTo(83);
+    assertThat(batchPrompts.getFirst()).contains("questionIndex=0");
     InterviewReportDTO.QuestionEvaluation detail = new InterviewReportDTO.QuestionEvaluation(
         0, "索引是什么？", "MYSQL", "数据库", "B 树", 83, "准确");
     assertThat(detail.categoryKey()).isEqualTo("MYSQL");
   }
 
   @Test
-  @DisplayName("模型返回错误类别键时使用会话题目的稳定键和本地标签")
+  @DisplayName("模型返回错误类别键时拒绝整份评估")
   void rejectsChangedModelCategoryKey() throws Exception {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
     when(invoker.invoke(any(), any(), any(), any(), any(), any(), any(), any()))
@@ -78,12 +87,63 @@ class StableCategoryEvaluationTest {
     UnifiedEvaluationService unified = new UnifiedEvaluationService(
         invoker, new DefaultResourceLoader(), new InterviewEvaluationProperties());
 
-    EvaluationReport report = unified.evaluate(mock(ChatClient.class), "session",
-        List.of(new QaRecord(0, "索引是什么？", "MYSQL", "MySQL", "B 树")), null);
+    assertThatThrownBy(() -> unified.evaluate(mock(ChatClient.class), "session",
+        List.of(new QaRecord(0, "索引是什么？", "MYSQL", "MySQL", "B 树")), null))
+        .isInstanceOf(BusinessException.class)
+        .hasMessageContaining("categoryKey");
+  }
 
-    assertThat(report.questionDetails().getFirst().categoryKey()).isEqualTo("MYSQL");
-    assertThat(report.questionDetails().getFirst().categoryLabel()).isEqualTo("MySQL");
+  @Test
+  @DisplayName("结构化结果顺序变化时按原始 questionIndex 还原分数")
+  void acceptsReorderedValidResults() throws Exception {
+    EvaluationReport report = evaluateResults(List.of(
+        new QaRecord(0, "第一题", "MYSQL", "MySQL", "回答一"),
+        new QaRecord(1, "第二题", "JAVA", "Java", "回答二")), List.of(
+        construct("QuestionEvalDTO", 1, "JAVA", 20, "二", "", List.of()),
+        construct("QuestionEvalDTO", 0, "MYSQL", 90, "一", "", List.of())));
+
+    assertThat(report.questionDetails()).extracting(EvaluationReport.QuestionEvaluation::score)
+        .containsExactly(90, 20);
+  }
+
+  @Test
+  @DisplayName("重复题号和缺失题号不会写出伪造零分报告")
+  void rejectsDuplicateAndMissingIndices() throws Exception {
+    List<QaRecord> questions = List.of(
+        new QaRecord(0, "第一题", "MYSQL", "MySQL", "回答一"),
+        new QaRecord(1, "第二题", "JAVA", "Java", "回答二"));
+    Object first = construct("QuestionEvalDTO", 0, "MYSQL", 90, "一", "", List.of());
+
+    assertThatThrownBy(() -> evaluateResults(questions, List.of(first, first)))
+        .isInstanceOf(BusinessException.class);
+    assertThatThrownBy(() -> evaluateResults(questions, List.of(first)))
+        .isInstanceOf(BusinessException.class);
+    assertThatThrownBy(() -> evaluateResults(questions, List.of(first,
+        construct("QuestionEvalDTO", 2, "JAVA", 20, "二", "", List.of()))))
+        .isInstanceOf(BusinessException.class);
+  }
+
+  @Test
+  @DisplayName("真实零分且题号类别键正确时保留零分评估")
+  void keepsGenuineZeroScore() throws Exception {
+    EvaluationReport report = evaluateResults(
+        List.of(new QaRecord(0, "索引？", "MYSQL", "MySQL", "不知道")),
+        List.of(construct("QuestionEvalDTO", 0, "MYSQL", 0, "未作答", "", List.of())));
+
     assertThat(report.questionDetails().getFirst().score()).isZero();
+    assertThat(report.questionDetails().getFirst().feedback()).isEqualTo("未作答");
+  }
+
+  private EvaluationReport evaluateResults(List<QaRecord> questions, List<Object> results)
+      throws Exception {
+    StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
+    when(invoker.invoke(any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenAnswer(call -> "总结评估".equals(call.getArgument(6))
+            ? construct("SummaryDTO", "总结", List.of(), List.of())
+            : construct("BatchReportDTO", 80, "好", List.of(), List.of(), results));
+    UnifiedEvaluationService unified = new UnifiedEvaluationService(
+        invoker, new DefaultResourceLoader(), new InterviewEvaluationProperties());
+    return unified.evaluate(mock(ChatClient.class), "session", questions, null);
   }
 
   @Test
@@ -130,6 +190,11 @@ class StableCategoryEvaluationTest {
     InterviewAnswerEntity saved = (InterviewAnswerEntity) answerCaptor.getValue().getFirst();
     assertThat(saved.getCategoryKey()).isEqualTo("MYSQL");
     assertThat(saved.getCategoryLabel()).isEqualTo("数据库");
+    var historical = Mappers.getMapper(InterviewMapper.class)
+        .toAnswerDetailDTO(saved, List.of());
+    assertThat(historical.categoryKey()).isEqualTo("MYSQL");
+    assertThat(historical.categoryLabel()).isEqualTo("数据库");
+    assertThat(historical.category()).isEqualTo("数据库");
   }
 
   @Test

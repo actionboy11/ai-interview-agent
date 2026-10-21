@@ -2,6 +2,7 @@ package interview.guide.modules.interview.messaging.rabbit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,9 +11,12 @@ import static org.mockito.Mockito.when;
 import com.rabbitmq.client.Channel;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
@@ -26,12 +30,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.ai.chat.client.ChatClient;
 import tools.jackson.databind.ObjectMapper;
 
 class InterviewEvaluationRabbitConsumerTest {
 
   private InterviewSessionRepository sessionRepository;
   private InterviewPersistenceService persistenceService;
+  private AnswerEvaluationService evaluationService;
   private InterviewEvaluationRabbitProducer producer;
   private Channel channel;
   private InterviewEvaluationRabbitConsumer consumer;
@@ -40,6 +46,7 @@ class InterviewEvaluationRabbitConsumerTest {
   void setUp() {
     sessionRepository = mock(InterviewSessionRepository.class);
     persistenceService = mock(InterviewPersistenceService.class);
+    evaluationService = mock(AnswerEvaluationService.class);
     producer = mock(InterviewEvaluationRabbitProducer.class);
     channel = mock(Channel.class);
     var properties = new InterviewEvaluationRabbitProperties(
@@ -48,7 +55,7 @@ class InterviewEvaluationRabbitConsumerTest {
     );
     consumer = new InterviewEvaluationRabbitConsumer(
         sessionRepository,
-        mock(AnswerEvaluationService.class),
+        evaluationService,
         persistenceService,
         new ObjectMapper(),
         mock(LlmProviderRegistry.class),
@@ -117,6 +124,30 @@ class InterviewEvaluationRabbitConsumerTest {
 
     verify(producer).publishDead(eq(message), any());
     verify(channel).basicAck(10L, false);
+  }
+
+  @Test
+  @DisplayName("评估题号或类别键校验失败时重试消息且不保存报告")
+  void shouldNotPersistInvalidEvaluation() throws Exception {
+    InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setSessionId("session-42");
+    session.setQuestionsJson(new ObjectMapper().writeValueAsString(List.of(
+        InterviewQuestionDTO.create(0, "索引？", "MYSQL", "MySQL"))));
+    when(sessionRepository.findBySessionIdWithResume("session-42"))
+        .thenReturn(Optional.of(session));
+    when(persistenceService.findAnswersBySessionIdInternal("session-42"))
+        .thenReturn(List.of());
+    when(evaluationService.evaluateInterview(nullable(ChatClient.class), eq("session-42"),
+        eq(""), any())).thenThrow(new BusinessException(
+            ErrorCode.INTERVIEW_EVALUATION_FAILED, "categoryKey 不匹配"));
+    InterviewEvaluationMessage task = message("session-42", 0);
+
+    consumer.consume(task, envelope(11L), channel);
+
+    verify(producer).publishRetry(eq(task), any());
+    verify(persistenceService, never()).saveReport(eq("session-42"), any(), any());
+    verify(channel).basicAck(11L, false);
   }
 
   private InterviewEvaluationMessage message(String sessionId, int retryCount) {

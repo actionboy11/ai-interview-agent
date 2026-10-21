@@ -35,4 +35,4 @@
 - `feedback` 必须具体指出答案的优点与不足，不可笼统评价
 - `referenceAnswer` 应体现深度，包含原理分析和最佳实践
 - **无效回答必须给 0 分**：如果候选人回答“不知道”、“忘记了”、“不会”、“不清楚”、“没学过”、“跳过”等表示放弃作答的内容，或回答完全无实质技术内容，该题分数必须为 0
-- 每题 `questionEvaluations` 必须原样返回输入中的 `questionIndex` 和 `categoryKey`。`categoryKey` 是机器稳定键，不得根据展示类别名称猜测或修改。
+- 每题 `questionEvaluations` 必须原样返回输入方括号中的零基 `questionIndex` 和 `categoryKey`。问题标题中的编号仅供阅读，不是 `questionIndex`。`categoryKey` 是机器稳定键，不得根据展示类别名称猜测或修改。
