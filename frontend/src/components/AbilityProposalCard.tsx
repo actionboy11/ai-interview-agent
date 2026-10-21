@@ -6,16 +6,18 @@ import { getErrorMessage } from '../api/request';
 import { ROUTES } from '../constants/routes';
 import type { AbilityEvidence, AbilityLevel, AbilityProposal } from '../types/memory';
 import { abilityLevelDisplay, proposalStatusDisplay } from '../utils/abilityLevel';
+import { proposalActions } from '../utils/abilityActions';
 
 const levels: AbilityLevel[] = ['WEAK', 'DEVELOPING', 'COMPETENT', 'PROFICIENT', 'STRONG'];
 
 interface Props {
   proposal: AbilityProposal;
   sessionId: string;
-  onDecision: () => Promise<void>;
+  onDecision: (updated: AbilityProposal) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }
 
-export default function AbilityProposalCard({ proposal, sessionId, onDecision }: Props) {
+export default function AbilityProposalCard({ proposal, sessionId, onDecision, onRefresh }: Props) {
   const [evidence, setEvidence] = useState<AbilityEvidence[]>([]);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
   const [evidenceError, setEvidenceError] = useState('');
@@ -50,10 +52,11 @@ export default function AbilityProposalCard({ proposal, sessionId, onDecision }:
   const status = proposalStatusDisplay(proposal.status);
   const isCurrentSession = proposal.interviewSessionId === sessionId;
   const lowEvidence = evidence.length < 3;
-  const canAct = status.actionable && isCurrentSession && !busy && !evidenceLoading && !evidenceError && evidence.length > 0;
+  const actions = proposalActions(proposal.status, proposal.version, isCurrentSession, busy,
+    evidenceLoading, Boolean(evidenceError), evidence.length, confirmed);
 
   const decide = async (action: 'accept' | 'edit' | 'reject') => {
-    if (!canAct || ((action === 'accept' || action === 'edit') && lowEvidence && !confirmed)) return;
+    if (action === 'reject' ? !actions.reject : !actions.accept) return;
     if (action === 'edit' && (!level || !summary.trim() || summary.length > 2000)) {
       setError('请选择等级，并填写不超过 2000 字的摘要');
       return;
@@ -61,13 +64,19 @@ export default function AbilityProposalCard({ proposal, sessionId, onDecision }:
     setBusy(true);
     setError('');
     try {
-      if (action === 'accept') await memoryApi.accept(proposal.id, proposal.version);
-      if (action === 'edit') await memoryApi.acceptWithEdit(proposal.id, proposal.version, level as AbilityLevel, summary.trim());
-      if (action === 'reject') await memoryApi.reject(proposal.id, proposal.version);
-      await onDecision();
+      if (action === 'reject') {
+        await memoryApi.reject(proposal.id, proposal.version);
+        await onDecision({ ...proposal, status: 'REJECTED' });
+      } else {
+        const profile = action === 'accept'
+          ? await memoryApi.accept(proposal.id, proposal.version)
+          : await memoryApi.acceptWithEdit(proposal.id, proposal.version, level as AbilityLevel, summary.trim());
+        await onDecision({ ...proposal, status: action === 'accept' ? 'ACCEPTED' : 'ACCEPTED_WITH_EDIT',
+          finalLevel: profile.level, finalScore: profile.score, finalSummary: profile.summary });
+      }
     } catch (err) {
       setError(`${getErrorMessage(err)}。请刷新候选后重试。`);
-      await onDecision().catch(() => undefined);
+      await onRefresh();
     } finally {
       setBusy(false);
     }
@@ -142,9 +151,9 @@ export default function AbilityProposalCard({ proposal, sessionId, onDecision }:
           )}
           {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!canAct || (lowEvidence && !confirmed)} onClick={() => decide(editing ? 'edit' : 'accept')} className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"><Check className="h-4 w-4" />{busy ? '处理中…' : editing ? '编辑后接受' : '接受建议'}</button>
+            <button type="button" disabled={!actions.accept} onClick={() => decide(editing ? 'edit' : 'accept')} className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"><Check className="h-4 w-4" />{busy ? '处理中…' : editing ? '编辑后接受' : '接受建议'}</button>
             <button type="button" disabled={busy} onClick={() => setEditing(value => !value)} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 dark:text-slate-200"><Pencil className="h-4 w-4" />{editing ? '取消编辑' : '编辑后接受'}</button>
-            <button type="button" disabled={!canAct} onClick={() => decide('reject')} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-700 disabled:opacity-50"><X className="h-4 w-4" />拒绝</button>
+            <button type="button" disabled={!actions.reject} onClick={() => decide('reject')} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-700 disabled:opacity-50"><X className="h-4 w-4" />拒绝</button>
           </div>
         </div>
       )}

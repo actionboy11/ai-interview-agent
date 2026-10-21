@@ -1,12 +1,12 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {getScoreColor} from '../utils/score';
 import type {InterviewDetail} from '../api/history';
 import {memoryApi} from '../api/memory';
-import {getErrorMessage} from '../api/request';
 import type {AbilityProposal} from '../types/memory';
 import {RefreshCw} from 'lucide-react';
 import AbilityProposalCard from './AbilityProposalCard';
+import {LatestCollection} from '../utils/latestCollection';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -87,46 +87,32 @@ function AbilityProposalsSection({ sessionId, evaluationStatus, evaluationError 
   evaluationStatus?: string;
   evaluationError?: string;
 }) {
-  const [proposals, setProposals] = useState<AbilityProposal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const refresh = async () => {
-    const items = await memoryApi.proposals(sessionId);
-    setProposals(items.filter(item => item.interviewSessionId === sessionId));
-    setError('');
+  const collection = useMemo(() => new LatestCollection<AbilityProposal>(async () =>
+    (await memoryApi.proposals(sessionId)).filter(item => item.interviewSessionId === sessionId),
+  ), [sessionId]);
+  const { items: proposals, loading, error } = useSyncExternalStore(collection.subscribe, collection.getSnapshot);
+  const refresh = () => collection.load();
+  const afterDecision = async (updated: AbilityProposal) => {
+    collection.update(items => items.map(item => item.id === updated.id ? updated : item));
+    await collection.load();
   };
 
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setLoading(true);
-    setProposals([]);
-    setError('');
     const poll = async () => {
-      try {
-        const items = await memoryApi.proposals(sessionId);
-        if (!active) return;
-        setProposals(items.filter(item => item.interviewSessionId === sessionId));
-        setError('');
-      } catch (err) {
-        if (active) setError(getErrorMessage(err));
-      } finally {
-        if (active) {
-          setLoading(false);
-          if (evaluationStatus === 'COMPLETED') timer = setTimeout(poll, 5000);
-        }
-      }
+      await collection.load();
+      if (active && evaluationStatus === 'COMPLETED') timer = setTimeout(poll, 5000);
     };
     void poll();
-    return () => { active = false; if (timer) clearTimeout(timer); };
-  }, [sessionId, evaluationStatus]);
+    return () => { active = false; if (timer) clearTimeout(timer); collection.invalidate(); };
+  }, [collection, evaluationStatus]);
 
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold text-slate-900 dark:text-white">能力画像建议</h3>
-        <button type="button" onClick={() => void refresh().catch(err => setError(getErrorMessage(err)))} className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"><RefreshCw className="h-4 w-4" />刷新建议</button>
+        <button type="button" onClick={() => void refresh()} className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"><RefreshCw className="h-4 w-4" />刷新建议</button>
       </div>
       {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">加载建议失败：{error}</p>}
       {loading && <p className="text-sm text-slate-500">正在加载能力建议…</p>}
@@ -138,7 +124,7 @@ function AbilityProposalsSection({ sessionId, evaluationStatus, evaluationError 
         </p>
       )}
       {proposals.filter(item => item.interviewSessionId === sessionId).map(item => (
-        <AbilityProposalCard key={item.id} proposal={item} sessionId={sessionId} onDecision={refresh} />
+        <AbilityProposalCard key={item.id} proposal={item} sessionId={sessionId} onDecision={afterDecision} onRefresh={refresh} />
       ))}
     </section>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ExternalLink, RefreshCw, ShieldOff, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { memoryApi } from '../api/memory';
@@ -6,31 +6,23 @@ import { getErrorMessage } from '../api/request';
 import { ROUTES } from '../constants/routes';
 import type { AbilityEvidence, AbilityProfile } from '../types/memory';
 import { abilityLevelDisplay, profileStatusDisplay, proposalStatusDisplay } from '../utils/abilityLevel';
+import { LatestCollection } from '../utils/latestCollection';
 
 export default function AbilityProfilePage() {
-  const [profiles, setProfiles] = useState<AbilityProfile[]>([]);
+  const collection = useMemo(() => new LatestCollection<AbilityProfile>(() => memoryApi.profiles()), []);
+  const { items: profiles, loading, error: listError } = useSyncExternalStore(collection.subscribe, collection.getSnapshot);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [evidence, setEvidence] = useState<AbilityEvidence[]>([]);
-  const [loading, setLoading] = useState(true);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [evidenceError, setEvidenceError] = useState('');
 
-  const loadProfiles = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      setProfiles(await memoryApi.profiles());
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { void loadProfiles(); }, []);
+  useEffect(() => {
+    void collection.load();
+    return () => collection.invalidate();
+  }, [collection]);
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -55,12 +47,12 @@ export default function AbilityProfilePage() {
       const updated = action === 'disable'
         ? await memoryApi.disable(profile.id, profile.version)
         : await memoryApi.enable(profile.id, profile.version);
-      setProfiles(current => current.map(item => item.id === updated.id ? updated : item));
+      collection.update(items => items.map(item => item.id === updated.id ? updated : item));
       setNotice(action === 'disable' ? '已停用能力画像' : '已启用能力画像');
     } catch (err) {
       const message = getErrorMessage(err);
-      await loadProfiles();
-      setError(`${message}。画像已刷新，请重试。`);
+      await collection.load();
+      setError(`${message}。${collection.getSnapshot().error ? '刷新失败，请稍后重试。' : '画像已刷新，请重试。'}`);
     } finally {
       setBusyId(null);
     }
@@ -75,12 +67,12 @@ export default function AbilityProfilePage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">我的能力画像</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">来自你已确认的面试证据</p>
         </div>
-        <button type="button" onClick={() => void loadProfiles()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"><RefreshCw className="h-4 w-4" />刷新</button>
+        <button type="button" onClick={() => void collection.load()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"><RefreshCw className="h-4 w-4" />刷新</button>
       </div>
-      {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+      {(error || listError) && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error || listError}</p>}
       {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
       {loading && <p className="text-sm text-slate-500">正在加载能力画像…</p>}
-      {!loading && !error && profiles.length === 0 && <p className="rounded-xl bg-white p-6 text-slate-500 dark:bg-slate-800">暂无已确认能力。完成面试并在报告中确认建议后会显示在这里。</p>}
+      {!loading && !error && !listError && profiles.length === 0 && <p className="rounded-xl bg-white p-6 text-slate-500 dark:bg-slate-800">暂无已确认能力。完成面试并在报告中确认建议后会显示在这里。</p>}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-3">
@@ -109,8 +101,8 @@ export default function AbilityProfilePage() {
 
         {selected && (
           <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 className="font-semibold text-slate-900 dark:text-white">{selected.skillId} · {selected.categoryKey} 的证据</h2>
-            <p className="mt-1 text-xs text-slate-500">证据评分为面试原始记录，仅供查看。</p>
+            <h2 className="font-semibold text-slate-900 dark:text-white">{selected.skillId} · {selected.categoryKey} 的相关证据</h2>
+            <p className="mt-1 text-xs text-slate-500">仅“已接受”和“编辑后接受”的证据计入画像；待确认或已拒绝的记录仅供追溯。原始评分不可编辑。</p>
             {evidenceLoading && <p className="mt-4 text-sm text-slate-500">加载证据中…</p>}
             {evidenceError && <p role="alert" className="mt-4 text-sm text-rose-600">{evidenceError}</p>}
             {!evidenceLoading && !evidenceError && evidence.length === 0 && <p className="mt-4 text-sm text-slate-500">暂无证据记录。</p>}
