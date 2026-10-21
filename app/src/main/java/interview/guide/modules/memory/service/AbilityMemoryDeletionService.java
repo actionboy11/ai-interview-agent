@@ -2,6 +2,7 @@ package interview.guide.modules.memory.service;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.model.AbilityProfileStatus;
@@ -33,6 +34,7 @@ public class AbilityMemoryDeletionService {
   private final UserAbilityEvidenceRepository evidence;
   private final UserAbilityProfileRepository profiles;
   private final AbilityScorePolicy scores;
+  private final UserRepository users;
 
   /** Removes memory before answers and sessions, then replays only surviving accepted evidence. */
   @Transactional
@@ -40,6 +42,8 @@ public class AbilityMemoryDeletionService {
     if (sessionIds.isEmpty()) {
       return;
     }
+    users.findByIdForAbilityDecision(ownerId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
     List<Long> uniqueIds = sessionIds.stream().distinct().sorted().toList();
     var owned = sessions.findByOwnerIdAndIdInOrderById(ownerId, uniqueIds);
     if (owned.size() != uniqueIds.size()) {
@@ -86,14 +90,16 @@ public class AbilityMemoryDeletionService {
           profile.setConfirmedEvidenceCount(0);
           profile.setConfidence(0);
           profile.setStatus(AbilityProfileStatus.DISABLED);
-          profile.setStatusBeforeDisable(null);
+          profile.setManuallyEdited(false);
+          profile.setLastEvaluatedAt(null);
           continue;
         }
         Map<Long, List<UserAbilityEvidenceEntity>> byProposal = items.stream()
             .collect(Collectors.groupingBy(item -> item.getProposal().getId()));
         var groups = byProposal.values().stream().sorted(Comparator
             .comparing((List<UserAbilityEvidenceEntity> group) ->
-                group.getFirst().getProposal().getCreatedAt())
+                group.getFirst().getProposal().getDecisionOrder(),
+                Comparator.nullsLast(Comparator.naturalOrder()))
             .thenComparing(group -> group.getFirst().getProposal().getId())).toList();
         Integer replayed = null;
         for (var group : groups) {
@@ -102,21 +108,33 @@ public class AbilityMemoryDeletionService {
           replayed = replayed == null ? sessionScore : scores.mergeScore(replayed, sessionScore);
         }
         profile.setConfirmedEvidenceCount(items.size());
+        profile.setScore(replayed);
         profile.setConfidence(Math.min(1.0, 0.25 + groups.size() * 0.25));
         profile.setLastEvaluatedAt(items.stream().map(UserAbilityEvidenceEntity::getOccurredAt)
             .max(Instant::compareTo).orElse(null));
-        if (profile.isManuallyEdited()) {
+        boolean hasManualDecision = groups.stream().anyMatch(group ->
+            group.getFirst().getProposal().getStatus()
+                == AbilityProposalStatus.ACCEPTED_WITH_EDIT);
+        profile.setManuallyEdited(hasManualDecision);
+        if (hasManualDecision) {
+          var latest = groups.getLast().getFirst().getProposal();
+          profile.setLevel(latest.getFinalLevel());
+          profile.setSummary(latest.getFinalSummary());
           if (profile.getStatus() == AbilityProfileStatus.DISABLED) {
-            profile.setStatusBeforeDisable(AbilityProfileStatus.NEEDS_REVIEW);
+            if (profile.getStatusBeforeDisable() != null) {
+              profile.setStatusBeforeDisable(AbilityProfileStatus.NEEDS_REVIEW);
+            } else {
+              profile.setStatus(AbilityProfileStatus.NEEDS_REVIEW);
+            }
           } else {
             profile.setStatus(AbilityProfileStatus.NEEDS_REVIEW);
           }
         } else {
           var latest = groups.getLast().getFirst().getProposal();
-          profile.setScore(replayed);
           profile.setLevel(scores.levelFor(replayed));
           profile.setSummary(latest.getFinalSummary());
-          if (profile.getStatus() != AbilityProfileStatus.DISABLED) {
+          if (profile.getStatus() != AbilityProfileStatus.DISABLED
+              || profile.getStatusBeforeDisable() == null) {
             profile.setStatus(AbilityProfileStatus.ACTIVE);
           }
         }

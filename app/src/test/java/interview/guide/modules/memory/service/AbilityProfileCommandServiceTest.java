@@ -14,12 +14,14 @@ import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.model.AbilityProfileStatus;
 import interview.guide.modules.memory.model.AbilityProposalStatus;
 import interview.guide.modules.memory.model.UserAbilityEvidenceEntity;
+import interview.guide.modules.memory.model.UserAbilityProfileEntity;
 import interview.guide.modules.memory.mapper.AbilityMemoryMapper;
 import interview.guide.modules.memory.repository.AbilityProfileProposalRepository;
 import interview.guide.modules.memory.repository.UserAbilityEvidenceRepository;
 import interview.guide.modules.memory.repository.UserAbilityProfileRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -211,6 +213,150 @@ class AbilityProfileCommandServiceTest {
         .isInstanceOf(BusinessException.class);
     assertThatThrownBy(() -> queries.evidenceForProposal(bob.ownerId(), alice.proposalId()))
         .isInstanceOf(BusinessException.class);
+  }
+
+  @Test
+  @DisplayName("删除最后一份证据后确认新候选从本场分数重新起算并重新激活")
+  void acceptAfterAllEvidenceDeletedStartsFresh() {
+    Fixture old = fixture(80);
+    commands.accept(old.ownerId(), old.proposalId(), 0);
+    deletions.deleteOwnedSessions(old.ownerId(), List.of(old.sessionId()));
+    var empty = profile(old.ownerId());
+    assertThat(empty.getConfirmedEvidenceCount()).isZero();
+    assertThat(empty.getStatus()).isEqualTo(AbilityProfileStatus.DISABLED);
+
+    Fixture next = fixture(old.ownerId(), 40);
+    var accepted = commands.accept(old.ownerId(), next.proposalId(), 0);
+    assertThat(accepted.score()).isEqualTo(40);
+    assertThat(accepted.status()).isEqualTo(AbilityProfileStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("用户主动禁用后删除全部旧证据，新确认候选仍保持禁用")
+  void explicitDisableSurvivesSourceDeletionAndNewAcceptance() {
+    Fixture old = fixture(80);
+    var initial = commands.accept(old.ownerId(), old.proposalId(), 0);
+    commands.disable(old.ownerId(), initial.id(), initial.version());
+    deletions.deleteOwnedSessions(old.ownerId(), List.of(old.sessionId()));
+
+    Fixture next = fixture(old.ownerId(), 40);
+    var accepted = commands.accept(old.ownerId(), next.proposalId(), 0);
+    assertThat(accepted.score()).isEqualTo(40);
+    assertThat(accepted.status()).isEqualTo(AbilityProfileStatus.DISABLED);
+    assertThat(commands.enable(old.ownerId(), accepted.id(), accepted.version()).status())
+        .isEqualTo(AbilityProfileStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("待复核画像主动禁用后确认新证据仍禁用，重新启用时不残留旧待复核状态")
+  void newDecisionReviewsExplicitlyDisabledProfile() {
+    Fixture first = fixture(80);
+    commands.acceptWithEdit(first.ownerId(), first.proposalId(), 0,
+        AbilityLevel.WEAK, "手工摘要");
+    Fixture second = fixture(first.ownerId(), 40);
+    commands.accept(second.ownerId(), second.proposalId(), 0);
+    deletions.deleteOwnedSessions(second.ownerId(), List.of(second.sessionId()));
+    var needsReview = profile(first.ownerId());
+    assertThat(needsReview.getStatus()).isEqualTo(AbilityProfileStatus.NEEDS_REVIEW);
+    commands.disable(first.ownerId(), needsReview.getId(), needsReview.getVersion());
+
+    Fixture third = fixture(first.ownerId(), 60);
+    var accepted = commands.accept(third.ownerId(), third.proposalId(), 0);
+    assertThat(accepted.status()).isEqualTo(AbilityProfileStatus.DISABLED);
+    assertThat(commands.enable(first.ownerId(), accepted.id(), accepted.version()).status())
+        .isEqualTo(AbilityProfileStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("删除来源后按确认顺序回放，早创建晚确认的候选不会提前计分")
+  void replayUsesDecisionChronology() {
+    Fixture createdFirst = fixture(80);
+    Fixture createdSecond = fixture(createdFirst.ownerId(), 40);
+    Fixture removed = fixture(createdFirst.ownerId(), 20);
+    commands.accept(createdSecond.ownerId(), createdSecond.proposalId(), 0);
+    commands.accept(createdFirst.ownerId(), createdFirst.proposalId(), 0);
+    assertThat(commands.accept(removed.ownerId(), removed.proposalId(), 0).score())
+        .isEqualTo(42);
+
+    deletions.deleteOwnedSessions(removed.ownerId(), List.of(removed.sessionId()));
+    assertThat(profile(createdFirst.ownerId()).getScore()).isEqualTo(52);
+  }
+
+  @Test
+  @DisplayName("普通确认后删除该来源，仍在的人工批准等级摘要保持且画像待复核")
+  void replayRestoresSurvivingManualDecision() {
+    Fixture manual = fixture(80);
+    commands.acceptWithEdit(manual.ownerId(), manual.proposalId(), 0,
+        AbilityLevel.WEAK, "人工批准摘要");
+    Fixture plain = fixture(manual.ownerId(), 40);
+    commands.accept(plain.ownerId(), plain.proposalId(), 0);
+    deletions.deleteOwnedSessions(plain.ownerId(), List.of(plain.sessionId()));
+
+    var surviving = profile(manual.ownerId());
+    assertThat(surviving.getScore()).isEqualTo(80);
+    assertThat(surviving.getLevel()).isEqualTo(AbilityLevel.WEAK);
+    assertThat(surviving.getSummary()).isEqualTo("人工批准摘要");
+    assertThat(surviving.getStatus()).isEqualTo(AbilityProfileStatus.NEEDS_REVIEW);
+    assertThat(surviving.isManuallyEdited()).isTrue();
+  }
+
+  @Test
+  @DisplayName("同类不同场次确认与删除并发时只保留有效证据且无内部异常")
+  void concurrentAcceptAndDifferentSourceDeletion() throws Exception {
+    Fixture old = fixture(80);
+    commands.accept(old.ownerId(), old.proposalId(), 0);
+    Fixture next = fixture(old.ownerId(), 40);
+    var start = new CountDownLatch(1);
+    var acceptedFailure = new AtomicReference<Throwable>();
+    var deletedFailure = new AtomicReference<Throwable>();
+    Thread accept = Thread.ofVirtual().start(() -> acceptAfter(start, next, acceptedFailure));
+    Thread delete = Thread.ofVirtual().start(() -> deleteAfter(start, old, deletedFailure));
+    start.countDown();
+    accept.join(Duration.ofSeconds(15));
+    delete.join(Duration.ofSeconds(15));
+    assertThat(accept.isAlive()).isFalse();
+    assertThat(delete.isAlive()).isFalse();
+    assertThat(acceptedFailure.get()).isNull();
+    assertThat(deletedFailure.get()).isNull();
+    assertThat(profile(old.ownerId()).getScore()).isEqualTo(40);
+    assertThat(profile(old.ownerId()).getStatus()).isEqualTo(AbilityProfileStatus.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("同一来源删除和确认竞态仅允许业务冲突，不留下孤立候选或证据")
+  void concurrentDecisionAndSameSourceDeletion() throws Exception {
+    Fixture source = fixture(80);
+    var start = new CountDownLatch(1);
+    var acceptedFailure = new AtomicReference<Throwable>();
+    var deletedFailure = new AtomicReference<Throwable>();
+    Thread accept = Thread.ofVirtual().start(() -> acceptAfter(start, source, acceptedFailure));
+    Thread delete = Thread.ofVirtual().start(() -> deleteAfter(start, source, deletedFailure));
+    start.countDown();
+    accept.join(Duration.ofSeconds(15));
+    delete.join(Duration.ofSeconds(15));
+    assertThat(accept.isAlive()).isFalse();
+    assertThat(delete.isAlive()).isFalse();
+    assertThat(deletedFailure.get()).isNull();
+    if (acceptedFailure.get() != null) {
+      assertThat(acceptedFailure.get()).isInstanceOf(BusinessException.class);
+    }
+    assertThat(proposals.findById(source.proposalId())).isEmpty();
+    assertThat(evidence.findByOwnerIdAndInterviewSessionId(source.ownerId(),
+        source.sessionId())).isEmpty();
+  }
+
+  private void deleteAfter(CountDownLatch start, Fixture fixture,
+      AtomicReference<Throwable> failure) {
+    try {
+      start.await();
+      deletions.deleteOwnedSessions(fixture.ownerId(), List.of(fixture.sessionId()));
+    } catch (Throwable error) {
+      failure.set(error);
+    }
+  }
+
+  private UserAbilityProfileEntity profile(UUID ownerId) {
+    return profiles.findByOwnerIdAndSkillIdAndCategoryKey(ownerId, "java", "JAVA").orElseThrow();
   }
 
   private void acceptAfter(CountDownLatch start, Fixture fixture,

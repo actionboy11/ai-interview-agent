@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface AbilityProfileProposalRepository
     extends JpaRepository<AbilityProfileProposalEntity, Long> {
@@ -20,4 +22,10 @@ public interface AbilityProfileProposalRepository
 
   List<AbilityProfileProposalEntity> findByOwnerIdAndStatus(
       UUID ownerId, AbilityProposalStatus status);
+
+  @Query("select coalesce(max(p.decisionOrder), 0) from AbilityProfileProposalEntity p "
+      + "where p.owner.id = :ownerId and p.skillId = :skillId "
+      + "and p.categoryKey = :categoryKey")
+  long maxDecisionOrder(@Param("ownerId") UUID ownerId,
+      @Param("skillId") String skillId, @Param("categoryKey") String categoryKey);
 }

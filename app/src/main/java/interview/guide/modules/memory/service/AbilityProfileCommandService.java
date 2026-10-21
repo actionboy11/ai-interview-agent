@@ -44,6 +44,7 @@ public class AbilityProfileCommandService {
 
   @Transactional
   public void reject(UUID ownerId, Long proposalId, long version) {
+    lockOwner(ownerId, ErrorCode.ABILITY_PROPOSAL_NOT_FOUND);
     var proposal = requireProposal(ownerId, proposalId, version);
     proposal.setStatus(AbilityProposalStatus.REJECTED);
     proposal.setDecidedAt(Instant.now());
@@ -52,6 +53,7 @@ public class AbilityProfileCommandService {
 
   @Transactional
   public AbilityProfileSnapshot disable(UUID ownerId, Long profileId, long version) {
+    lockOwner(ownerId, ErrorCode.ABILITY_PROFILE_NOT_FOUND);
     var profile = requireProfile(ownerId, profileId, version);
     if (profile.getStatus() == AbilityProfileStatus.DISABLED) {
       throw new BusinessException(ErrorCode.ABILITY_INVALID_STATE);
@@ -63,6 +65,7 @@ public class AbilityProfileCommandService {
 
   @Transactional
   public AbilityProfileSnapshot enable(UUID ownerId, Long profileId, long version) {
+    lockOwner(ownerId, ErrorCode.ABILITY_PROFILE_NOT_FOUND);
     var profile = requireProfile(ownerId, profileId, version);
     if (profile.getStatus() != AbilityProfileStatus.DISABLED
         || profile.getConfirmedEvidenceCount() == 0) {
@@ -76,8 +79,7 @@ public class AbilityProfileCommandService {
 
   private AbilityProfileSnapshot decide(UUID ownerId, Long proposalId, long version,
       AbilityLevel editedLevel, String editedSummary, boolean edited) {
-    users.findByIdForAbilityDecision(ownerId)
-        .orElseThrow(() -> new BusinessException(ErrorCode.ABILITY_PROPOSAL_NOT_FOUND));
+    lockOwner(ownerId, ErrorCode.ABILITY_PROPOSAL_NOT_FOUND);
     var proposal = requireProposal(ownerId, proposalId, version);
     var profile = profiles.findByOwnerIdAndSkillIdAndCategoryKey(ownerId,
         proposal.getSkillId(), proposal.getCategoryKey()).orElseGet(() -> {
@@ -88,7 +90,9 @@ public class AbilityProfileCommandService {
           created.setStatus(AbilityProfileStatus.ACTIVE);
           return created;
         });
-    int merged = profile.getId() == null ? proposal.getProposedScore()
+    boolean hasAcceptedEvidence = profile.getId() != null
+        && profile.getConfirmedEvidenceCount() > 0;
+    int merged = !hasAcceptedEvidence ? proposal.getProposedScore()
         : scores.mergeScore(profile.getScore(), proposal.getProposedScore());
     var items = evidence.findByOwnerIdAndProposalId(ownerId, proposalId);
     if (items.isEmpty()) {
@@ -98,7 +102,7 @@ public class AbilityProfileCommandService {
     profile.setScore(merged);
     profile.setLevel(edited ? editedLevel : scores.levelFor(merged));
     profile.setSummary(edited ? editedSummary : proposal.getProposedSummary());
-    profile.setManuallyEdited(edited);
+    profile.setManuallyEdited((hasAcceptedEvidence && profile.isManuallyEdited()) || edited);
     profile.setConfirmedEvidenceCount(profile.getConfirmedEvidenceCount() + items.size());
     long sessions = evidence.countDistinctAcceptedSessions(ownerId, proposal.getSkillId(),
         proposal.getCategoryKey(),
@@ -107,12 +111,17 @@ public class AbilityProfileCommandService {
     profile.setLastEvaluatedAt(items.stream().map(item -> item.getOccurredAt())
         .max(Instant::compareTo).orElse(now));
     profile.setLastConfirmedAt(now);
-    if (profile.getStatus() != AbilityProfileStatus.DISABLED) {
+    if (profile.getStatus() == AbilityProfileStatus.DISABLED
+        && profile.getStatusBeforeDisable() != null) {
+      profile.setStatusBeforeDisable(AbilityProfileStatus.ACTIVE);
+    } else {
       profile.setStatus(AbilityProfileStatus.ACTIVE);
     }
     proposal.setFinalScore(merged);
     proposal.setFinalLevel(profile.getLevel());
     proposal.setFinalSummary(profile.getSummary());
+    proposal.setDecisionOrder(proposals.maxDecisionOrder(ownerId, proposal.getSkillId(),
+        proposal.getCategoryKey()) + 1);
     proposal.setStatus(edited ? AbilityProposalStatus.ACCEPTED_WITH_EDIT
         : AbilityProposalStatus.ACCEPTED);
     proposal.setDecidedAt(now);
@@ -130,6 +139,11 @@ public class AbilityProfileCommandService {
       throw new BusinessException(ErrorCode.ABILITY_INVALID_STATE);
     }
     return proposal;
+  }
+
+  private void lockOwner(UUID ownerId, ErrorCode missing) {
+    users.findByIdForAbilityDecision(ownerId)
+        .orElseThrow(() -> new BusinessException(missing));
   }
 
   private UserAbilityProfileEntity requireProfile(UUID ownerId, Long id, long version) {

@@ -462,6 +462,8 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteSessionsByResumeId(Long resumeId) {
+        userRepository.findByIdForAbilityDecision(currentUser.requireUserId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
         List<InterviewSessionEntity> sessions = findByResumeId(resumeId);
         if (!sessions.isEmpty()) {
             memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(),
@@ -477,6 +479,8 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteSessionBySessionId(String sessionId) {
+        userRepository.findByIdForAbilityDecision(currentUser.requireUserId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
         InterviewSessionEntity session = requireOwnedSession(sessionId);
         memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(), List.of(session.getId()));
         log.info("已删除面试会话: sessionId={}", sessionId);

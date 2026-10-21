@@ -82,6 +82,9 @@ public class AbilityProfileProposalEntity {
   @Column(name = "final_summary", columnDefinition = "text")
   private String finalSummary;
 
+  @Column(name = "decision_order")
+  private Long decisionOrder;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
   private AbilityProposalStatus status;

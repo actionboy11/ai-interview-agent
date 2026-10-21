@@ -47,7 +47,7 @@ class FlywayBaselineIntegrationTest {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -260,8 +260,8 @@ class FlywayBaselineIntegrationTest {
           'ADMIN', 'ACTIVE', true, now(), now(), 0)
         """);
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(6);
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
@@ -289,7 +289,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("8");
+          .isEqualTo("9");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(
