@@ -122,6 +122,60 @@ class AdaptiveAllocationPolicyTest {
   }
 
   @Test
+  @DisplayName("弱项名额不会被近期覆盖偏斜的基础分配挤掉或突破分类上限")
+  void reservesWeaknessCapacityBeforeBaseline() {
+    var coverage = Map.of("PROJECT", 100, "JAVA", 0, "MYSQL", 100,
+        "REDIS", 100, "SPRING", 100, "MQ", 100, "OS", 100, "NETWORK", 100);
+    var command = new QuestionPlanningCommand(SKILL, categories(), 10, "mid", false,
+        coverage, List.of(), Set.of());
+    var plan = policy.plan(command,
+        List.of(profile(1L, "JAVA", AbilityLevel.WEAK, .9, "2026-01-01T00:00:00Z")),
+        Map.of());
+
+    assertThat(plan.slots()).hasSize(10);
+    assertThat(plan.slots().stream().filter(slot ->
+        slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT)
+        .map(slot -> slot.categoryKey()).toList()).containsExactly("JAVA", "JAVA", "JAVA");
+    assertThat(plan.slots().stream().collect(Collectors.groupingBy(
+        slot -> slot.categoryKey(), Collectors.counting())).values())
+        .allSatisfy(count -> assertThat(count).isLessThanOrEqualTo(3L));
+  }
+
+  @Test
+  @DisplayName("分类很少时仅放宽到完成题量所需的均摊上限")
+  void constrainedCategoriesRespectNecessaryCap() {
+    var cats = List.of(cat("PROJECT", "ALWAYS_ONE"), cat("JAVA", "CORE"));
+    var plan = policy.plan(command(10, false, cats),
+        List.of(profile(1L, "JAVA", AbilityLevel.WEAK, .9, "2026-01-01T00:00:00Z")),
+        Map.of());
+
+    assertThat(plan.slots()).hasSize(10);
+    assertThat(plan.slots().stream().collect(Collectors.groupingBy(
+        slot -> slot.categoryKey(), Collectors.counting())).values())
+        .allSatisfy(count -> assertThat(count).isLessThanOrEqualTo(5L));
+    assertThat(plan.slots().stream().filter(slot ->
+        slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT).count()).isEqualTo(3);
+  }
+
+  @Test
+  @DisplayName("强制题占据弱项分类容量时短缺回流基础题且不伪造弱项标签")
+  void mandatoryCapacityMayReduceWeaknessBudget() {
+    var cats = List.of(cat("JAVA", "ALWAYS_ONE"), cat("PROJECT", "CORE"),
+        cat("MYSQL", "CORE"), cat("REDIS", "CORE"), cat("SPRING", "CORE"),
+        cat("MQ", "NORMAL"), cat("OS", "NORMAL"), cat("NETWORK", "NORMAL"));
+    var plan = policy.plan(command(10, false, cats),
+        List.of(profile(1L, "JAVA", AbilityLevel.WEAK, .9, "2026-01-01T00:00:00Z")),
+        Map.of());
+
+    assertThat(plan.slots()).hasSize(10);
+    assertThat(plan.slots().getFirst().purpose()).isEqualTo(QuestionPurpose.MANDATORY);
+    assertThat(plan.slots().stream().filter(slot ->
+        slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT).count()).isEqualTo(2);
+    assertThat(plan.slots().stream().filter(slot -> slot.categoryKey().equals("JAVA")).count())
+        .isEqualTo(3);
+  }
+
+  @Test
   @DisplayName("无画像沿用现有 Skill 固定分配，简历存在时按六四分源")
   void noMemoryUsesExistingAllocation() {
     var command = command(10, true, categories());
@@ -155,6 +209,47 @@ class AdaptiveAllocationPolicyTest {
         Map.of("JAVA", 2L, "MYSQL", 1L));
     assertThat(plan.resumeSlots()).hasSize(6);
     assertThat(plan.directionSlots()).hasSize(4);
+  }
+
+  @Test
+  @DisplayName("没有已验证简历事实时五种用途都只能走方向题")
+  void ungroundedResumeNeverCreatesResumeSlots() {
+    var command = new QuestionPlanningCommand(SKILL, categories(), 10, "mid", true,
+        Map.of(), List.of(), Set.of());
+    var adaptive = policy.plan(command, profiles(), Map.of());
+    var fixed = policy.plan(command, List.of(), Map.of());
+
+    assertThat(adaptive.slots().stream().map(slot -> slot.purpose()).distinct().toList())
+        .containsExactlyInAnyOrder(QuestionPurpose.MANDATORY, QuestionPurpose.BASELINE,
+            QuestionPurpose.WEAKNESS_REINFORCEMENT, QuestionPurpose.EXPLORATION,
+            QuestionPurpose.STRENGTH_CALIBRATION);
+    assertThat(adaptive.resumeSlots()).isEmpty();
+    assertThat(adaptive.directionSlots()).hasSize(10);
+    assertThat(fixed.resumeSlots()).isEmpty();
+    assertThat(fixed.directionSlots()).hasSize(10);
+    assertThat(fixed.directionSlots().stream().collect(Collectors.groupingBy(
+        slot -> slot.categoryKey(), Collectors.summingInt(slot -> 1))))
+        .containsExactlyInAnyOrderEntriesOf(skills.calculateAllocation(categories(), 10)
+            .entrySet().stream().filter(entry -> entry.getValue() > 0)
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+  }
+
+  @Test
+  @DisplayName("部分简历事实仅允许匹配分类出简历题并保持精确总数")
+  void partialGroundingLimitsResumeCategories() {
+    var command = new QuestionPlanningCommand(SKILL, categories(), 10, "mid", true,
+        Map.of(), List.of(), Set.of("JAVA"));
+    var adaptive = policy.plan(command, profiles(), Map.of());
+    var fixed = policy.plan(command, List.of(), Map.of());
+
+    assertThat(adaptive.slots()).hasSize(10);
+    assertThat(fixed.slots()).hasSize(10);
+    assertThat(adaptive.resumeSlots()).allSatisfy(slot ->
+        assertThat(slot.categoryKey()).isEqualTo("JAVA"));
+    assertThat(fixed.resumeSlots()).allSatisfy(slot ->
+        assertThat(slot.categoryKey()).isEqualTo("JAVA"));
+    assertThat(adaptive.resumeSlots()).hasSizeLessThanOrEqualTo(3);
+    assertThat(fixed.resumeSlots()).hasSizeLessThanOrEqualTo(3);
   }
 
   @Test
@@ -211,7 +306,8 @@ class AdaptiveAllocationPolicyTest {
   private static QuestionPlanningCommand command(int total, boolean resume,
       List<SkillCategoryDTO> categories) {
     return new QuestionPlanningCommand(SKILL, categories, total, "mid", resume,
-        Map.of(), List.of(), Set.of());
+        Map.of(), List.of(), resume ? categories.stream()
+            .map(SkillCategoryDTO::key).collect(Collectors.toSet()) : Set.of());
   }
 
   private static List<SkillCategoryDTO> categories() {

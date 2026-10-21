@@ -98,16 +98,27 @@ public class AdaptiveAllocationPolicy {
     int cap = Math.max((int) Math.ceil(command.totalQuestions() * .3),
         (int) Math.ceil((double) command.totalQuestions() / categories.size()));
     int missing = addMandatory(categories, budget[MANDATORY], assigned, drafts);
-    budget[BASELINE] += missing;
-    missing = addBaseline(command, categories, budget[BASELINE], cap, assigned, drafts);
-    missing += addProfiles(weak, budget[WEAKNESS], cap, QuestionPurpose.WEAKNESS_REINFORCEMENT,
-        assigned, drafts);
-    missing += addExploration(command, unknown, budget[EXPLORATION], cap, assigned, drafts);
-    missing += addProfiles(strong, budget[STRENGTH], cap, QuestionPurpose.STRENGTH_CALIBRATION,
-        assigned, drafts);
-    if (missing > 0) {
-      addBaseline(command, categories, missing, Integer.MAX_VALUE, assigned, drafts);
+    // Reserve later-purpose capacity before baseline selects its categories. The final
+    // slot order still follows the shortage priority: mandatory, baseline, weak,
+    // exploration, strength.
+    List<Draft> reservedWeak = new ArrayList<>();
+    List<Draft> reservedExploration = new ArrayList<>();
+    List<Draft> reservedStrong = new ArrayList<>();
+    missing += addProfiles(weak, budget[WEAKNESS], cap,
+        QuestionPurpose.WEAKNESS_REINFORCEMENT, assigned, reservedWeak);
+    missing += addExploration(command, unknown, budget[EXPLORATION], cap,
+        assigned, reservedExploration);
+    missing += addProfiles(strong, budget[STRENGTH], cap,
+        QuestionPurpose.STRENGTH_CALIBRATION, assigned, reservedStrong);
+    int baselineShortage = addBaseline(command, categories, budget[BASELINE] + missing,
+        cap, assigned, drafts);
+    if (baselineShortage > 0) {
+      throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+          "分类上限下无法满足面试题量");
     }
+    drafts.addAll(reservedWeak);
+    drafts.addAll(reservedExploration);
+    drafts.addAll(reservedStrong);
 
     boolean qualified = byCategory.values().stream().filter(profile ->
         confirmedSessionCounts != null
@@ -119,11 +130,8 @@ public class AdaptiveAllocationPolicy {
     int resumeAssigned = 0;
     for (Draft draft : drafts) {
       AbilityProfileResponse profile = byCategory.get(draft.categoryKey());
-      boolean groundedWeakness = command.groundedResumeCategoryKeys()
-          .contains(draft.categoryKey());
-      boolean resumeEligible = draft.purpose() != QuestionPurpose.WEAKNESS_REINFORCEMENT
-          || groundedWeakness;
-      QuestionSourceMode source = resumeAssigned < resumeTarget && resumeEligible
+      boolean grounded = command.groundedResumeCategoryKeys().contains(draft.categoryKey());
+      QuestionSourceMode source = resumeAssigned < resumeTarget && grounded
           ? QuestionSourceMode.RESUME : QuestionSourceMode.DIRECTION;
       if (source == QuestionSourceMode.RESUME) {
         resumeAssigned++;
@@ -142,10 +150,27 @@ public class AdaptiveAllocationPolicy {
 
   public QuestionPlan fallback(QuestionPlanningCommand command, String reason) {
     requireValid(command);
-    int resumeCount = command.hasResume()
+    int resumeTarget = command.hasResume()
         ? (int) Math.round(command.totalQuestions() * .6) : 0;
-    int directionCount = command.totalQuestions() - resumeCount;
-    Map<String, Integer> allocation = skills.calculateAllocation(command.categories(), directionCount);
+    int cap = Math.max((int) Math.ceil(command.totalQuestions() * .3),
+        (int) Math.ceil((double) command.totalQuestions() / command.categories().size()));
+    List<SkillCategoryDTO> grounded = command.categories().stream()
+        .filter(category -> command.groundedResumeCategoryKeys().contains(category.key()))
+        .toList();
+    int resumeCount = resumeTarget;
+    Map<String, Integer> allocation;
+    while (true) {
+      int candidateDirectionCount = command.totalQuestions() - resumeCount;
+      Map<String, Integer> candidateAllocation = reconciledFixedAllocation(
+          command.categories(), candidateDirectionCount);
+      int resumeCapacity = grounded.stream().mapToInt(category ->
+          Math.max(0, cap - candidateAllocation.getOrDefault(category.key(), 0))).sum();
+      allocation = candidateAllocation;
+      if (resumeCount <= resumeCapacity) {
+        break;
+      }
+      resumeCount = resumeCapacity;
+    }
     var avoided = avoidedTopics(command.historicalQuestions());
     List<QuestionSlot> slots = new ArrayList<>();
     List<SkillCategoryDTO> ordered = command.categories().stream()
@@ -160,21 +185,31 @@ public class AdaptiveAllocationPolicy {
             avoided.getOrDefault(category.key(), List.of()), null));
       }
     }
-    // The legacy allocator stops after ALWAYS_ONE when no CORE/NORMAL category exists.
-    // Reconcile that rare deficit to preserve the plan's exact total.
-    while (slots.size() < directionCount) {
-      SkillCategoryDTO category = ordered.getFirst();
-      slots.add(new QuestionSlot(slotId(slots.size()), category.key(), QuestionPurpose.BASELINE,
-          command.baseDifficulty(), QuestionSourceMode.DIRECTION, List.of(),
-          avoided.getOrDefault(category.key(), List.of()), null));
-    }
+    Map<String, Integer> assigned = new HashMap<>(allocation);
     for (int i = 0; i < resumeCount; i++) {
-      SkillCategoryDTO category = command.categories().get(i % command.categories().size());
+      SkillCategoryDTO category = grounded.stream()
+          .filter(candidate -> assigned.getOrDefault(candidate.key(), 0) < cap)
+          .min(Comparator.comparingInt((SkillCategoryDTO candidate) ->
+              assigned.getOrDefault(candidate.key(), 0)).thenComparing(SkillCategoryDTO::key))
+          .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+              "简历题槽缺少已验证的分类事实"));
+      assigned.merge(category.key(), 1, Integer::sum);
       slots.add(new QuestionSlot(slotId(slots.size()), category.key(), QuestionPurpose.BASELINE,
           command.baseDifficulty(), QuestionSourceMode.RESUME, List.of(),
           avoided.getOrDefault(category.key(), List.of()), null));
     }
     return new QuestionPlan(PLAN_VERSION, PlanningMode.FIXED, slots, reason);
+  }
+
+  private Map<String, Integer> reconciledFixedAllocation(List<SkillCategoryDTO> categories,
+      int directionCount) {
+    Map<String, Integer> allocation = new LinkedHashMap<>(
+        skills.calculateAllocation(categories, directionCount));
+    int shortfall = directionCount - allocation.values().stream().mapToInt(Integer::intValue).sum();
+    if (shortfall > 0) {
+      allocation.merge(categories.getFirst().key(), shortfall, Integer::sum);
+    }
+    return allocation;
   }
 
   private static int[] budget(int total, int mandatoryCategories) {
