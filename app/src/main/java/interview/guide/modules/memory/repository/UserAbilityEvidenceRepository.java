@@ -10,6 +10,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface UserAbilityEvidenceRepository extends JpaRepository<UserAbilityEvidenceEntity, Long> {
+  interface ConfirmedSessionCount {
+    String getCategoryKey();
+    long getSessionCount();
+  }
+
   Optional<UserAbilityEvidenceEntity> findByOwnerIdAndInterviewAnswerId(UUID ownerId, Long answerId);
 
   List<UserAbilityEvidenceEntity> findByOwnerIdAndProposalId(UUID ownerId, Long proposalId);
@@ -27,5 +32,13 @@ public interface UserAbilityEvidenceRepository extends JpaRepository<UserAbility
       + "and e.proposal.status in :statuses")
   long countDistinctAcceptedSessions(@Param("ownerId") UUID ownerId,
       @Param("skillId") String skillId, @Param("categoryKey") String categoryKey,
+      @Param("statuses") List<AbilityProposalStatus> statuses);
+
+  @Query("select e.categoryKey as categoryKey, count(distinct e.interviewSession.id) "
+      + "as sessionCount from UserAbilityEvidenceEntity e "
+      + "where e.owner.id = :ownerId and e.skillId = :skillId "
+      + "and e.proposal.status in :statuses group by e.categoryKey")
+  List<ConfirmedSessionCount> countDistinctAcceptedSessionsByCategory(
+      @Param("ownerId") UUID ownerId, @Param("skillId") String skillId,
       @Param("statuses") List<AbilityProposalStatus> statuses);
 }

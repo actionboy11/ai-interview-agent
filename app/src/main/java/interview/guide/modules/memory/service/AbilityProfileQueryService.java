@@ -7,11 +7,14 @@ import interview.guide.modules.memory.dto.AbilityEvidenceResponse;
 import interview.guide.modules.memory.dto.AbilityProfileResponse;
 import interview.guide.modules.memory.dto.AbilityProposalResponse;
 import interview.guide.modules.memory.mapper.AbilityMemoryMapper;
+import interview.guide.modules.memory.model.AbilityProposalStatus;
 import interview.guide.modules.memory.repository.AbilityProfileProposalRepository;
 import interview.guide.modules.memory.repository.UserAbilityEvidenceRepository;
 import interview.guide.modules.memory.repository.UserAbilityProfileRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +33,15 @@ public class AbilityProfileQueryService {
     var found = skillId == null ? profiles.findByOwnerIdOrderBySkillIdAscCategoryKeyAsc(ownerId)
         : profiles.findByOwnerIdAndSkillIdOrderByCategoryKeyAsc(ownerId, skillId);
     return found.stream().map(mapper::toResponse).toList();
+  }
+
+  @Transactional(readOnly = true)
+  public Map<String, Long> confirmedSessionCounts(UUID ownerId, String skillId) {
+    return evidence.countDistinctAcceptedSessionsByCategory(ownerId, skillId,
+        List.of(AbilityProposalStatus.ACCEPTED, AbilityProposalStatus.ACCEPTED_WITH_EDIT))
+        .stream().collect(Collectors.toMap(
+            UserAbilityEvidenceRepository.ConfirmedSessionCount::getCategoryKey,
+            UserAbilityEvidenceRepository.ConfirmedSessionCount::getSessionCount));
   }
 
   @Transactional(readOnly = true)
