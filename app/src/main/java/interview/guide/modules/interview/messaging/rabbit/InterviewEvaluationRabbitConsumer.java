@@ -12,6 +12,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
 import java.util.List;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class InterviewEvaluationRabbitConsumer {
   private final InterviewEvaluationRabbitProducer producer;
   private final InterviewEvaluationRetryPolicy retryPolicy;
   private final InterviewSessionCache sessionCache;
+  private final AbilityMemoryDerivationTaskPublisher memoryPublisher;
 
   public InterviewEvaluationRabbitConsumer(
       InterviewSessionRepository sessionRepository,
@@ -48,7 +50,8 @@ public class InterviewEvaluationRabbitConsumer {
       LlmProviderRegistry llmProviderRegistry,
       InterviewEvaluationRabbitProducer producer,
       InterviewEvaluationRetryPolicy retryPolicy,
-      InterviewSessionCache sessionCache
+      InterviewSessionCache sessionCache,
+      AbilityMemoryDerivationTaskPublisher memoryPublisher
   ) {
     this.sessionRepository = sessionRepository;
     this.evaluationService = evaluationService;
@@ -58,6 +61,7 @@ public class InterviewEvaluationRabbitConsumer {
     this.producer = producer;
     this.retryPolicy = retryPolicy;
     this.sessionCache = sessionCache;
+    this.memoryPublisher = memoryPublisher;
   }
 
   @RabbitListener(
@@ -84,12 +88,16 @@ public class InterviewEvaluationRabbitConsumer {
       channel.basicAck(deliveryTag, false);
       return;
     }
-    if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
-        || task.messageId().toString().equals(session.getEvaluationMessageId())) {
+    if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+      publishCompletedDerivation(session, deliveryTag, channel);
+      return;
+    }
+    if (task.messageId().toString().equals(session.getEvaluationMessageId())) {
       channel.basicAck(deliveryTag, false);
       return;
     }
 
+    InterviewPersistenceService.CompletionResult completion;
     try {
       persistenceService.updateEvaluateStatusInternal(
           task.sessionId(),
@@ -97,15 +105,34 @@ public class InterviewEvaluationRabbitConsumer {
           null
       );
       InterviewReportDTO report = evaluate(session);
-      persistenceService.saveReport(
+      completion = persistenceService.saveReport(
           task.sessionId(),
           report,
           task.messageId().toString()
       );
-      syncEvaluatedStatusToCache(session);
-      channel.basicAck(deliveryTag, false);
     } catch (Exception exception) {
       routeFailure(task, deliveryTag, channel, exception);
+      return;
+    }
+    if (completion == InterviewPersistenceService.CompletionResult.SESSION_MISSING) {
+      channel.basicAck(deliveryTag, false);
+    } else {
+      publishCompletedDerivation(session, deliveryTag, channel);
+    }
+  }
+
+  private void publishCompletedDerivation(InterviewSessionEntity session, long deliveryTag,
+      Channel channel) throws Exception {
+    try {
+      if (session.getMemoryDerivationStatus() != AsyncTaskStatus.COMPLETED) {
+        memoryPublisher.publish(session.getSessionId());
+      }
+      syncEvaluatedStatusToCache(session);
+      channel.basicAck(deliveryTag, false);
+    } catch (RuntimeException failure) {
+      log.error("Unable to publish memory derivation: sessionId={}",
+          session.getSessionId(), failure);
+      channel.basicNack(deliveryTag, false, true);
     }
   }
 

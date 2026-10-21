@@ -28,6 +28,7 @@ import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRab
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRabbitProducer;
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRetryPolicy;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
+import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
 import interview.guide.modules.interview.listener.EvaluateStreamConsumer;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
@@ -133,7 +134,8 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
         });
     var consumer = new InterviewEvaluationRabbitConsumer(sessions, evaluation, interviewPersistence,
         mapper, llm, mock(InterviewEvaluationRabbitProducer.class),
-        mock(InterviewEvaluationRetryPolicy.class), cache);
+        mock(InterviewEvaluationRetryPolicy.class), cache,
+        mock(AbilityMemoryDerivationTaskPublisher.class));
     var channel = mock(Channel.class);
     for (String id : List.of(valid.getSessionId(), invalid.getSessionId(), "deleted")) {
       var messageId = UUID.randomUUID();

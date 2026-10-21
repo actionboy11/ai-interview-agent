@@ -13,6 +13,9 @@ public interface UserAbilityProfileRepository extends JpaRepository<UserAbilityP
   Optional<UserAbilityProfileEntity> findByOwnerIdAndSkillIdAndCategoryKey(
       UUID ownerId, String skillId, String categoryKey);
 
+  List<UserAbilityProfileEntity> findByOwnerIdAndSkillIdAndCategoryKeyIn(
+      UUID ownerId, String skillId, List<String> categoryKeys);
+
   List<UserAbilityProfileEntity> findByOwnerIdAndSkillIdAndStatus(
       UUID ownerId, String skillId, AbilityProfileStatus status);
 }

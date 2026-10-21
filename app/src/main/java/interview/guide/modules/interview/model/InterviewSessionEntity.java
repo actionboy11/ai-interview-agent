@@ -135,6 +135,16 @@ public class InterviewSessionEntity {
     @Column(name = "evaluation_message_id", unique = true, length = 36)
     private String evaluationMessageId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "memory_derivation_status", length = 20)
+    private AsyncTaskStatus memoryDerivationStatus;
+
+    @Column(name = "memory_derivation_error", length = 500)
+    private String memoryDerivationError;
+
+    @Column(name = "memory_derivation_message_id", length = 36)
+    private String memoryDerivationMessageId;
+
     // LLM提供商
     @Column(length = 50)
     private String llmProvider = "dashscope";
@@ -298,6 +308,30 @@ public class InterviewSessionEntity {
 
     public void setEvaluationMessageId(String evaluationMessageId) {
         this.evaluationMessageId = evaluationMessageId;
+    }
+
+    public AsyncTaskStatus getMemoryDerivationStatus() {
+        return memoryDerivationStatus;
+    }
+
+    public void setMemoryDerivationStatus(AsyncTaskStatus memoryDerivationStatus) {
+        this.memoryDerivationStatus = memoryDerivationStatus;
+    }
+
+    public String getMemoryDerivationError() {
+        return memoryDerivationError;
+    }
+
+    public void setMemoryDerivationError(String memoryDerivationError) {
+        this.memoryDerivationError = memoryDerivationError;
+    }
+
+    public String getMemoryDerivationMessageId() {
+        return memoryDerivationMessageId;
+    }
+
+    public void setMemoryDerivationMessageId(String memoryDerivationMessageId) {
+        this.memoryDerivationMessageId = memoryDerivationMessageId;
     }
 
     public String getLlmProvider() {

@@ -260,6 +260,17 @@ app:
       dead-routing-key: interview.evaluation.dead
       retry-delays: 10s,30s,60s
 
+  ability-memory:
+    messaging:
+      provider: ${APP_ABILITY_MEMORY_MESSAGING_PROVIDER:rabbitmq}
+      exchange: ability.memory.derivation.exchange
+      queue: ability.memory.derivation.queue
+      routing-key: ability.memory.derivation
+      dead-exchange: ability.memory.derivation.dead.exchange
+      dead-queue: ability.memory.derivation.dead.queue
+      dead-routing-key: ability.memory.derivation.dead
+      retry-delays: 10s,30s,60s
+
   knowledge-vectorization:
     messaging:
       provider: ${APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER:rabbitmq}

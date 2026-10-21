@@ -1,9 +1,11 @@
 package interview.guide.modules.interview.messaging.rabbit;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,6 +22,7 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -39,6 +42,7 @@ class InterviewEvaluationRabbitConsumerTest {
   private InterviewPersistenceService persistenceService;
   private AnswerEvaluationService evaluationService;
   private InterviewEvaluationRabbitProducer producer;
+  private AbilityMemoryDerivationTaskPublisher memoryPublisher;
   private Channel channel;
   private InterviewEvaluationRabbitConsumer consumer;
 
@@ -48,6 +52,7 @@ class InterviewEvaluationRabbitConsumerTest {
     persistenceService = mock(InterviewPersistenceService.class);
     evaluationService = mock(AnswerEvaluationService.class);
     producer = mock(InterviewEvaluationRabbitProducer.class);
+    memoryPublisher = mock(AbilityMemoryDerivationTaskPublisher.class);
     channel = mock(Channel.class);
     var properties = new InterviewEvaluationRabbitProperties(
         "rabbitmq", "main", "queue", "route", "dead", "dead.queue", "dead.route",
@@ -61,7 +66,8 @@ class InterviewEvaluationRabbitConsumerTest {
         mock(LlmProviderRegistry.class),
         producer,
         new InterviewEvaluationRetryPolicy(properties),
-        mock(InterviewSessionCache.class)
+        mock(InterviewSessionCache.class),
+        memoryPublisher
     );
   }
 
@@ -83,6 +89,7 @@ class InterviewEvaluationRabbitConsumerTest {
     InterviewSessionEntity session = new InterviewSessionEntity();
     session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    session.setMemoryDerivationStatus(AsyncTaskStatus.COMPLETED);
     when(sessionRepository.findBySessionIdWithResume("session-42"))
         .thenReturn(Optional.of(session));
 
@@ -90,6 +97,42 @@ class InterviewEvaluationRabbitConsumerTest {
 
     verify(channel).basicAck(8L, false);
     verify(persistenceService, never()).updateEvaluateStatusInternal(any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("已完成评估重投递时补发派生任务且不再次调用模型")
+  void republishesCompletedEvaluationWithoutModelCall() throws Exception {
+    InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setSessionId("session-42");
+    session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    when(sessionRepository.findBySessionIdWithResume("session-42"))
+        .thenReturn(Optional.of(session));
+
+    consumer.consume(message("session-42", 0), envelope(18L), channel);
+
+    verify(memoryPublisher).publish("session-42");
+    verify(channel).basicAck(18L, false);
+    verify(evaluationService, never()).evaluateInterview(any(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("派生消息发布失败时重入队且评估保持完成")
+  void requeuesWhenDerivationPublicationFails() throws Exception {
+    InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setSessionId("session-42");
+    session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    when(sessionRepository.findBySessionIdWithResume("session-42"))
+        .thenReturn(Optional.of(session));
+    doThrow(new IllegalStateException("broker unavailable"))
+        .when(memoryPublisher).publish("session-42");
+
+    consumer.consume(message("session-42", 0), envelope(19L), channel);
+
+    verify(channel).basicNack(19L, false, true);
+    verify(persistenceService, never()).updateEvaluateStatusInternal(any(), any(), any());
+    assertThat(session.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
   }
 
   @Test
