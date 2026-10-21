@@ -63,6 +63,13 @@ public class UserAbilityProfileEntity {
   @Column(name = "confirmed_evidence_count", nullable = false)
   private int confirmedEvidenceCount;
 
+  @Column(name = "manually_edited", nullable = false)
+  private boolean manuallyEdited;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "status_before_disable", length = 20)
+  private AbilityProfileStatus statusBeforeDisable;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
   private AbilityProfileStatus status;

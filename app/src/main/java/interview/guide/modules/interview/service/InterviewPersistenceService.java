@@ -7,6 +7,7 @@ import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.model.UserStatus;
+import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.interview.model.HistoricalQuestion;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
@@ -47,6 +48,7 @@ public class InterviewPersistenceService {
     private final ObjectMapper objectMapper;
     private final CurrentUserProvider currentUser;
     private final UserRepository userRepository;
+    private final AbilityMemoryDeletionService memoryDeletion;
     
     /**
      * 保存新的面试会话（支持可选简历）
@@ -462,7 +464,8 @@ public class InterviewPersistenceService {
     public void deleteSessionsByResumeId(Long resumeId) {
         List<InterviewSessionEntity> sessions = findByResumeId(resumeId);
         if (!sessions.isEmpty()) {
-            sessionRepository.deleteAll(sessions);
+            memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(),
+                sessions.stream().map(InterviewSessionEntity::getId).toList());
             log.info("已删除 {} 个面试会话（包含所有答案）", sessions.size());
         }
     }
@@ -474,13 +477,9 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteSessionBySessionId(String sessionId) {
-        Optional<InterviewSessionEntity> sessionOpt = Optional.of(requireOwnedSession(sessionId));
-        if (sessionOpt.isPresent()) {
-            sessionRepository.delete(sessionOpt.get());
-            log.info("已删除面试会话: sessionId={}", sessionId);
-        } else {
-            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
-        }
+        InterviewSessionEntity session = requireOwnedSession(sessionId);
+        memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(), List.of(session.getId()));
+        log.info("已删除面试会话: sessionId={}", sessionId);
     }
     
     /**

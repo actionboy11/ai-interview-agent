@@ -47,7 +47,7 @@ class FlywayBaselineIntegrationTest {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -109,8 +109,8 @@ class FlywayBaselineIntegrationTest {
     String second = "22222222-2222-2222-2222-222222222222";
     String profile = """
         insert into user_ability_profiles (user_id, skill_id, category_key, level,
-          score, confidence, confirmed_evidence_count, status, version)
-        values (?::uuid, 'java-backend', 'JAVA', 'COMPETENT', ?, 0.5, 1, 'ACTIVE', 0)
+          score, confidence, confirmed_evidence_count, manually_edited, status, version)
+        values (?::uuid, 'java-backend', 'JAVA', 'COMPETENT', ?, 0.5, 1, false, 'ACTIVE', 0)
         """;
     jdbc.update(profile, first, 70);
     jdbc.update(profile, second, 70);
@@ -260,8 +260,8 @@ class FlywayBaselineIntegrationTest {
           'ADMIN', 'ACTIVE', true, now(), now(), 0)
         """);
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(6);
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
@@ -289,7 +289,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("7");
+          .isEqualTo("8");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(

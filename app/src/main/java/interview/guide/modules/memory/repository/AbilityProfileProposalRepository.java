@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AbilityProfileProposalRepository
     extends JpaRepository<AbilityProfileProposalEntity, Long> {
+  List<AbilityProfileProposalEntity> findByOwnerIdOrderByCreatedAtDescIdDesc(UUID ownerId);
   Optional<AbilityProfileProposalEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
   Optional<AbilityProfileProposalEntity> findByOwnerIdAndInterviewSessionIdAndCategoryKey(

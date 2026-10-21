@@ -91,7 +91,12 @@ public enum ErrorCode {
     AUTH_INVITE_INVALID(12005, "邀请码无效、已使用、已撤销或已过期"),
     AUTH_ADMIN_REQUIRED(12006, "需要启用的管理员账号"),
     AUTH_INVALID_INPUT(12007, "账号参数无效"),
-    AUTH_BOOTSTRAP_INVALID(12008, "初始管理员配置无效");
+    AUTH_BOOTSTRAP_INVALID(12008, "初始管理员配置无效"),
+
+    ABILITY_PROPOSAL_NOT_FOUND(13001, "能力候选不存在"),
+    ABILITY_PROFILE_NOT_FOUND(13002, "能力画像不存在"),
+    ABILITY_DECISION_CONFLICT(13003, "能力画像已更新，请刷新后重试"),
+    ABILITY_INVALID_STATE(13004, "当前状态不允许此操作");
 
     private final Integer code;
     private final String message;

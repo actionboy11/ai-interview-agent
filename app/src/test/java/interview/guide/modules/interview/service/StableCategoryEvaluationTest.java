@@ -25,6 +25,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.skill.InterviewSkillService;
+import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -165,7 +166,8 @@ class StableCategoryEvaluationTest {
             "MYSQL", "数据库", "", null, false)), true, null, null, null));
     InterviewPersistenceService persistence = new InterviewPersistenceService(sessions, answers,
         mock(ResumeRepository.class), new ObjectMapper(), mock(CurrentUserProvider.class),
-        mock(UserRepository.class));
+        mock(UserRepository.class),
+        mock(AbilityMemoryDeletionService.class));
     EvaluationReport commonReport = new EvaluationReport("session", 1, 83,
         List.of(new EvaluationReport.CategoryScore("MYSQL", "数据库", 83, 1)),
         List.of(new EvaluationReport.QuestionEvaluation(0, "索引？", "MYSQL", "数据库",

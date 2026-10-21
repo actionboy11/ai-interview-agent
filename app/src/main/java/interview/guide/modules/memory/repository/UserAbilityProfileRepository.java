@@ -8,6 +8,10 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface UserAbilityProfileRepository extends JpaRepository<UserAbilityProfileEntity, Long> {
+  List<UserAbilityProfileEntity> findByOwnerIdOrderBySkillIdAscCategoryKeyAsc(UUID ownerId);
+
+  List<UserAbilityProfileEntity> findByOwnerIdAndSkillIdOrderByCategoryKeyAsc(
+      UUID ownerId, String skillId);
   Optional<UserAbilityProfileEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
   Optional<UserAbilityProfileEntity> findByOwnerIdAndSkillIdAndCategoryKey(

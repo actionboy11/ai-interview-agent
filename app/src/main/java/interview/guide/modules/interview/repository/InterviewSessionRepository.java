@@ -22,6 +22,9 @@ import jakarta.persistence.LockModeType;
 @Repository
 public interface InterviewSessionRepository extends JpaRepository<InterviewSessionEntity, Long> {
 
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  List<InterviewSessionEntity> findByOwnerIdAndIdInOrderById(UUID ownerId, List<Long> ids);
+
   Optional<InterviewSessionEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 
   @EntityGraph(attributePaths = "resume")

@@ -32,7 +32,8 @@ import org.hibernate.annotations.Check;
     @Index(name = "idx_ability_proposal_owner_session", columnList = "user_id,interview_session_id")
 })
 @Check(constraints = "(previous_score is null or previous_score between 0 and 100) "
-    + "and proposed_score between 0 and 100")
+    + "and proposed_score between 0 and 100 "
+    + "and (final_score is null or final_score between 0 and 100)")
 @Getter
 @Setter
 public class AbilityProfileProposalEntity {
@@ -70,6 +71,16 @@ public class AbilityProfileProposalEntity {
 
   @Column(name = "proposed_summary", columnDefinition = "text")
   private String proposedSummary;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "final_level", length = 20)
+  private AbilityLevel finalLevel;
+
+  @Column(name = "final_score")
+  private Integer finalScore;
+
+  @Column(name = "final_summary", columnDefinition = "text")
+  private String finalSummary;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)

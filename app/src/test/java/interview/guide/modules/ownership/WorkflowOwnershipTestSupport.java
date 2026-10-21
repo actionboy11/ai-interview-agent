@@ -23,6 +23,9 @@ import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
 import interview.guide.modules.memory.messaging.AbilityMemoryDerivationTaskPublisher;
+import interview.guide.modules.memory.repository.UserAbilityProfileRepository;
+import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
+import interview.guide.modules.memory.service.AbilityScorePolicy;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
@@ -63,7 +66,8 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Import({ResumePersistenceService.class, ResumeHistoryService.class, ResumeDeleteService.class,
     ResumeUploadService.class, InterviewPersistenceService.class, InterviewSessionService.class,
-    MemoryDerivationPublicationService.class,
+    MemoryDerivationPublicationService.class, AbilityMemoryDeletionService.class,
+    AbilityScorePolicy.class,
     InterviewHistoryService.class, InterviewSessionCache.class, FileStorageService.class,
     FileHashService.class, FileValidationService.class, TransactionalExecutor.class,
     ResumeMapperImpl.class, InterviewMapperImpl.class, ObjectMapper.class,
@@ -73,7 +77,7 @@ import tools.jackson.databind.ObjectMapper;
 abstract class WorkflowOwnershipTestSupport {
   @Configuration(proxyBeanMethods = false)
   @EnableJpaRepositories(basePackageClasses = {ResumeAnalysisDeadLetterRepository.class,
-      InterviewEvaluationDeadLetterRepository.class})
+      InterviewEvaluationDeadLetterRepository.class, UserAbilityProfileRepository.class})
   static class DeadLetterConfiguration {
   }
 
