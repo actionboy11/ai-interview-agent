@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +18,10 @@ import interview.guide.modules.interview.planning.model.QuestionPurpose;
 import interview.guide.modules.interview.planning.model.QuestionSlot;
 import interview.guide.modules.interview.planning.model.QuestionSourceMode;
 import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
+import interview.guide.modules.interview.planning.service.InterviewQuestionPlanPersistenceService;
+import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.resume.model.ResumeEntity;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +31,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @DisplayName("持久化出题计划")
 class AdaptiveQuestionGenerationTest extends WorkflowOwnershipTestSupport {
   @Autowired InterviewQuestionPlanRepository plans;
+  @Autowired InterviewQuestionPlanPersistenceService planPersistence;
 
   @Test
   @DisplayName("模型调用前计划与会话已经提交且模型调用无事务")
@@ -63,7 +69,8 @@ class AdaptiveQuestionGenerationTest extends WorkflowOwnershipTestSupport {
     when(questions.generateFromPlan(any(), any(), any(), any(), any())).thenAnswer(call -> {
       QuestionPlan selected = call.getArgument(4);
       if (selected.mode() == PlanningMode.ADAPTIVE) {
-        throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED);
+        throw new interview.guide.modules.interview.service.InterviewQuestionService
+            .InvalidQuestionPlanOutputException();
       }
       assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
       assertThat(ownedPlans()).hasSize(2);
@@ -103,6 +110,71 @@ class AdaptiveQuestionGenerationTest extends WorkflowOwnershipTestSupport {
     });
     interviewService.createSession(new CreateInterviewRequest("Java project experience", 3,
         null, false, null, "java", "mid", null, null));
+  }
+
+  @Test
+  @DisplayName("待生成会话随所属简历删除，计划外键不阻止清理")
+  void pendingShellIsDeletedWithResume() {
+    ResumeEntity owned = resume(first, java.util.UUID.randomUUID().toString());
+    planPersistence.createShell("pending-delete-" + owned.getId(), first.getId(),
+        owned.getId(), null, "java", "mid", plan(PlanningMode.FIXED, null));
+    assertThat(ownedPlans()).hasSize(1);
+
+    resumeDelete.deleteResume(owned.getId());
+
+    assertThat(resumes.findById(owned.getId())).isEmpty();
+    assertThat(ownedPlans()).isEmpty();
+    assertThat(sessions.findByOwnerIdOrderByCreatedAtDesc(first.getId())).isEmpty();
+  }
+
+  @Test
+  @DisplayName("较新的待生成会话不遮挡较旧的可恢复会话")
+  void pendingShellDoesNotHideOlderUnfinished() {
+    ResumeEntity owned = resume(first, java.util.UUID.randomUUID().toString());
+    var older = new InterviewSessionEntity();
+    older.setSessionId("older-ready-" + owned.getId());
+    older.setOwner(first);
+    older.setResume(owned);
+    older.setTotalQuestions(1);
+    older.setQuestionsJson("[{\"questionIndex\":0,\"question\":\"Older\","
+        + "\"type\":\"java\",\"category\":\"Java\",\"isFollowUp\":false}]");
+    sessions.saveAndFlush(older);
+    planPersistence.createShell("newer-pending-" + owned.getId(), first.getId(),
+        owned.getId(), null, "java", "mid", plan(PlanningMode.FIXED, null));
+    cachedValues.clear();
+
+    assertThat(interviewService.findUnfinishedSessionOrThrow(owned.getId()).sessionId())
+        .isEqualTo(older.getSessionId());
+  }
+
+  @Test
+  @DisplayName("过期待生成会话连同计划安全删除")
+  void staleShellCleanupDeletesPlanAndSession() {
+    String id = "stale-" + java.util.UUID.randomUUID().toString().substring(0, 16);
+    planPersistence.createShell(id, first.getId(), null, null, "java", "mid",
+        plan(PlanningMode.FIXED, null));
+    var shell = sessions.findByOwnerIdAndSessionId(first.getId(), id).orElseThrow();
+    shell.setCreatedAt(LocalDateTime.now().minusDays(2));
+    sessions.saveAndFlush(shell);
+
+    interviewService.cleanupStaleSessions();
+
+    assertThat(sessions.findByOwnerIdAndSessionId(first.getId(), id)).isEmpty();
+    assertThat(plans.findByOwnerIdAndSessionSessionId(first.getId(), id)).isEmpty();
+  }
+
+  @Test
+  @DisplayName("模型供应商失败不误记为无效自适应输出并重复调用")
+  void providerFailureDoesNotTriggerInvalidOutputFallback() {
+    when(planning.plan(any())).thenReturn(plan(PlanningMode.ADAPTIVE, null));
+    when(questions.generateFromPlan(any(), any(), any(), any(), any()))
+        .thenThrow(new BusinessException(ErrorCode.INTERNAL_ERROR, "供应商不可用"));
+
+    assertThatThrownBy(() -> interviewService.createSession(request()))
+        .isInstanceOf(BusinessException.class).hasMessageContaining("供应商不可用");
+    verify(questions, times(1)).generateFromPlan(any(), any(), any(), any(), any());
+    verify(allocation, never()).fallback(any(), any());
+    assertThat(ownedPlans()).isEmpty();
   }
 
   private CreateInterviewRequest request() {

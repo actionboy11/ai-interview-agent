@@ -120,7 +120,7 @@ public class InterviewSessionService {
             try {
                 questions = questionService.generateFromPlan(request.llmProvider(), skill,
                     difficulty, generationResumeText, plan);
-            } catch (BusinessException generationFailure) {
+            } catch (InterviewQuestionService.InvalidQuestionPlanOutputException generationFailure) {
                 if (plan.mode() != PlanningMode.ADAPTIVE) {
                     throw generationFailure;
                 }
@@ -581,6 +581,13 @@ public class InterviewSessionService {
         for (InterviewSessionEntity session : staleSessions) {
             String sessionId = session.getSessionId();
             try {
+                if (session.getQuestionsJson() == null) {
+                    planPersistence.discardShell(sessionId, session.getOwner().getId());
+                    sessionCache.deleteSessionInternal(session.getOwner().getId(), sessionId,
+                        session.getResume() == null ? null : session.getResume().getId());
+                    cleaned++;
+                    continue;
+                }
                 persistenceService.updateSessionStatusInternal(sessionId,
                     InterviewSessionEntity.SessionStatus.COMPLETED);
                 persistenceService.updateEvaluateStatusInternal(sessionId, AsyncTaskStatus.FAILED,

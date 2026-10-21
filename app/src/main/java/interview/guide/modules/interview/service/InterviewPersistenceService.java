@@ -458,7 +458,10 @@ public class InterviewPersistenceService {
      * 查询简历关联的所有会话（删除前用于清理缓存）
      */
     public List<InterviewSessionEntity> findSessionsByResumeId(Long resumeId) {
-        return findByResumeId(resumeId);
+        requireOwnedResume(resumeId);
+        return sessionRepository.findByOwnerIdAndResumeIdOrderByCreatedAtDesc(
+            currentUser.requireUserId(), resumeId).stream()
+            .map(this::validateOwnership).toList();
     }
 
     /**
@@ -470,7 +473,7 @@ public class InterviewPersistenceService {
     public void deleteSessionsByResumeId(Long resumeId) {
         userRepository.findByIdForAbilityDecision(currentUser.requireUserId())
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
-        List<InterviewSessionEntity> sessions = findByResumeId(resumeId);
+        List<InterviewSessionEntity> sessions = findSessionsByResumeId(resumeId);
         if (!sessions.isEmpty()) {
             memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(),
                 sessions.stream().map(InterviewSessionEntity::getId).toList());
@@ -501,9 +504,10 @@ public class InterviewPersistenceService {
             InterviewSessionEntity.SessionStatus.CREATED,
             InterviewSessionEntity.SessionStatus.IN_PROGRESS
         );
-        return sessionRepository.findFirstByOwnerIdAndResumeIdAndStatusInOrderByCreatedAtDesc(
-            currentUser.requireUserId(), resumeId, unfinishedStatuses)
-            .filter(session -> session.getQuestionsJson() != null).map(this::validateOwnership);
+        return sessionRepository
+            .findFirstByOwnerIdAndResumeIdAndStatusInAndQuestionsJsonIsNotNullOrderByCreatedAtDesc(
+                currentUser.requireUserId(), resumeId, unfinishedStatuses)
+            .map(this::validateOwnership);
     }
 
     /**
@@ -513,7 +517,7 @@ public class InterviewPersistenceService {
         return sessionRepository.findByStatusInAndCreatedAtBefore(
             List.of(InterviewSessionEntity.SessionStatus.CREATED,
                     InterviewSessionEntity.SessionStatus.IN_PROGRESS),
-            before).stream().filter(session -> session.getQuestionsJson() != null).toList();
+            before);
     }
     
     /**
