@@ -1,5 +1,7 @@
 package interview.guide.common.evaluation;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
@@ -17,19 +19,33 @@ public record EvaluationReport(
     List<ReferenceAnswer> referenceAnswers
 ) {
     public record CategoryScore(
-        String category,
+        String categoryKey,
+        @JsonAlias("category") String categoryLabel,
         int score,
         int questionCount
-    ) {}
+    ) {
+        @JsonProperty("category")
+        public String category() { return categoryLabel; }
+    }
 
     public record QuestionEvaluation(
         int questionIndex,
         String question,
-        String category,
+        String categoryKey,
+        @JsonAlias("category") String categoryLabel,
         String userAnswer,
         int score,
         String feedback
-    ) {}
+    ) {
+        public QuestionEvaluation {
+            if (categoryKey == null || categoryKey.isBlank()) {
+                categoryKey = "OTHER";
+            }
+        }
+
+        @JsonProperty("category")
+        public String category() { return categoryLabel; }
+    }
 
     public record ReferenceAnswer(
         int questionIndex,

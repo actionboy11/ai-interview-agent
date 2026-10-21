@@ -170,7 +170,8 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public InterviewAnswerEntity saveAnswer(String sessionId, int questionIndex,
-                                            String question, String category,
+                                            String question, String categoryKey,
+                                            String categoryLabel,
                                             String userAnswer, int score, String feedback) {
         Optional<InterviewSessionEntity> sessionOpt = Optional.of(requireOwnedSession(sessionId));
         if (sessionOpt.isEmpty()) {
@@ -187,7 +188,8 @@ public class InterviewPersistenceService {
             });
 
         answer.setQuestion(question);
-        answer.setCategory(category);
+        answer.setCategoryKey(categoryKey != null && !categoryKey.isBlank() ? categoryKey : "OTHER");
+        answer.setCategoryLabel(categoryLabel);
         answer.setUserAnswer(userAnswer);
         answer.setScore(score);
         answer.setFeedback(feedback);
@@ -257,12 +259,13 @@ public class InterviewPersistenceService {
                     answer.setSession(session);
                     answer.setQuestionIndex(eval.questionIndex());
                     answer.setQuestion(eval.question());
-                    answer.setCategory(eval.category());
                     answer.setUserAnswer(null);  // 未回答
                     log.debug("为未回答的题目 {} 创建答案记录", eval.questionIndex());
                 }
 
                 // 更新评分和反馈
+                answer.setCategoryKey(eval.categoryKey());
+                answer.setCategoryLabel(eval.categoryLabel());
                 answer.setScore(eval.score());
                 answer.setFeedback(eval.feedback());
 

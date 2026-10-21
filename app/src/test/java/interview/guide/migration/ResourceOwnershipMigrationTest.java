@@ -184,7 +184,7 @@ class ResourceOwnershipMigrationTest {
     insertUser(fixture.jdbc(), OTHER, "other-user");
     insertRoot(fixture.jdbc(), "resumes", null);
     var configuration = Flyway.configure().dataSource(fixture.url(), POSTGRES.getUsername(),
-        POSTGRES.getPassword());
+        POSTGRES.getPassword()).target("3");
     var environment = new StandardEnvironment();
     environment.getPropertySources().replace(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
         new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
@@ -219,6 +219,7 @@ class ResourceOwnershipMigrationTest {
 
   private Flyway flyway(Fixture fixture, String normalizedOwner) {
     return Flyway.configure().dataSource(fixture.url(), POSTGRES.getUsername(), POSTGRES.getPassword())
+        .target("3")
         .placeholders(Map.of("legacy-owner-username",
             HexFormat.of().formatHex(normalizedOwner.getBytes(StandardCharsets.UTF_8))))
         .load();

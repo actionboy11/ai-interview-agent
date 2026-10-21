@@ -34,8 +34,12 @@ public class InterviewAnswerEntity {
     @Column(columnDefinition = "TEXT")
     private String question;
     
-    // 问题类别
-    private String category;
+    // 机器稳定键与展示标签分开保存。
+    @Column(name = "category_key", nullable = false)
+    private String categoryKey = "OTHER";
+
+    @Column(name = "category_label")
+    private String categoryLabel;
     
     // 用户答案
     @Column(columnDefinition = "TEXT")
@@ -99,11 +103,27 @@ public class InterviewAnswerEntity {
     }
     
     public String getCategory() {
-        return category;
+        return categoryLabel;
     }
     
     public void setCategory(String category) {
-        this.category = category;
+        this.categoryLabel = category;
+    }
+
+    public String getCategoryKey() {
+        return categoryKey;
+    }
+
+    public void setCategoryKey(String categoryKey) {
+        this.categoryKey = categoryKey;
+    }
+
+    public String getCategoryLabel() {
+        return categoryLabel;
+    }
+
+    public void setCategoryLabel(String categoryLabel) {
+        this.categoryLabel = categoryLabel;
     }
     
     public String getUserAnswer() {

@@ -55,6 +55,7 @@ public class UnifiedEvaluationService {
 
     private record QuestionEvalDTO(
         int questionIndex,
+        String categoryKey,
         int score,
         String feedback,
         String referenceAnswer,
@@ -128,7 +129,7 @@ public class UnifiedEvaluationService {
         );
 
         // 合并批次结果
-        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults);
+        List<QuestionEvalDTO> mergedEvaluations = mergeQuestionEvaluations(batchResults, qaRecords);
         String fallbackFeedback = mergeOverallFeedback(batchResults);
         List<String> fallbackStrengths = mergeListItems(batchResults, true);
         List<String> fallbackImprovements = mergeListItems(batchResults, false);
@@ -191,15 +192,16 @@ public class UnifiedEvaluationService {
     private String buildQARecords(List<QaRecord> batch) {
         StringBuilder sb = new StringBuilder();
         for (QaRecord q : batch) {
-            sb.append(String.format("问题%d [%s]: %s\n",
-                q.questionIndex() + 1, q.category(), q.question()));
+            sb.append(String.format("问题%d [categoryKey=%s, 类别=%s]: %s\n",
+                q.questionIndex() + 1, q.categoryKey(), q.categoryLabel(), q.question()));
             sb.append(String.format("回答: %s\n\n",
                 q.userAnswer() != null ? q.userAnswer() : "(未回答)"));
         }
         return sb.toString();
     }
 
-    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<BatchResult> batchResults) {
+    private List<QuestionEvalDTO> mergeQuestionEvaluations(List<BatchResult> batchResults,
+                                                            List<QaRecord> qaRecords) {
         List<QuestionEvalDTO> merged = new ArrayList<>();
         for (BatchResult result : batchResults) {
             int expectedSize = result.endIndex() - result.startIndex();
@@ -208,11 +210,19 @@ public class UnifiedEvaluationService {
                     ? result.report().questionEvaluations()
                     : List.of();
             for (int i = 0; i < expectedSize; i++) {
-                if (i < current.size() && current.get(i) != null) {
-                    merged.add(current.get(i));
+                QaRecord question = qaRecords.get(result.startIndex() + i);
+                QuestionEvalDTO returned = i < current.size() ? current.get(i) : null;
+                if (returned != null && returned.questionIndex() == question.questionIndex()
+                    && question.categoryKey().equals(returned.categoryKey())) {
+                    merged.add(returned);
                 } else {
+                    if (returned != null) {
+                        log.warn("评估结果题号或类别键不匹配: expectedIndex={}, expectedKey={}, returnedIndex={}, returnedKey={}",
+                            question.questionIndex(), question.categoryKey(),
+                            returned.questionIndex(), returned.categoryKey());
+                    }
                     merged.add(new QuestionEvalDTO(
-                        result.startIndex() + i, 0,
+                        question.questionIndex(), question.categoryKey(), 0,
                         "该题未成功生成评估结果，系统按 0 分处理。", "", List.of()
                     ));
                 }
@@ -294,6 +304,7 @@ public class UnifiedEvaluationService {
         List<QuestionEvaluation> questionDetails = new ArrayList<>();
         List<ReferenceAnswer> referenceAnswers = new ArrayList<>();
         Map<String, List<Integer>> categoryScoresMap = new HashMap<>();
+        Map<String, String> categoryLabels = new HashMap<>();
 
         long answeredCount = qaRecords.stream()
             .filter(q -> q.userAnswer() != null && !q.userAnswer().isBlank())
@@ -315,17 +326,20 @@ public class UnifiedEvaluationService {
                 ? eval.keyPoints() : List.of();
 
             questionDetails.add(new QuestionEvaluation(
-                q.questionIndex(), q.question(), q.category(), q.userAnswer(), score, feedback
+                q.questionIndex(), q.question(), q.categoryKey(), q.categoryLabel(),
+                q.userAnswer(), score, feedback
             ));
             referenceAnswers.add(new ReferenceAnswer(
                 q.questionIndex(), q.question(), refAnswer, keyPoints
             ));
-            categoryScoresMap.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(score);
+            categoryLabels.putIfAbsent(q.categoryKey(), q.categoryLabel());
+            categoryScoresMap.computeIfAbsent(q.categoryKey(), k -> new ArrayList<>()).add(score);
         }
 
         List<CategoryScore> categoryScores = categoryScoresMap.entrySet().stream()
             .map(e -> new CategoryScore(
                 e.getKey(),
+                categoryLabels.get(e.getKey()),
                 (int) e.getValue().stream().mapToInt(Integer::intValue).average().orElse(0),
                 e.getValue().size()
             ))
@@ -352,7 +366,7 @@ public class UnifiedEvaluationService {
             if (eval != null && q.userAnswer() != null && !q.userAnswer().isBlank()) {
                 score = eval.score();
             }
-            categoryScores.computeIfAbsent(q.category(), k -> new ArrayList<>()).add(score);
+            categoryScores.computeIfAbsent(q.categoryKey(), k -> new ArrayList<>()).add(score);
         }
         return categoryScores.entrySet().stream()
             .map(entry -> {

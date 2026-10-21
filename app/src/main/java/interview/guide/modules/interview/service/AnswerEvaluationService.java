@@ -17,6 +17,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 文字面试答案评估服务
@@ -47,15 +49,21 @@ public class AnswerEvaluationService {
         log.info("开始评估面试: {}, 共{}题", sessionId, questions.size());
 
         try {
-            // 转为通用问答记录
+            String skillId = persistenceService.findBySessionIdInternal(sessionId)
+                .map(s -> s.getSkillId())
+                .orElse(null);
+            Map<String, String> localLabels = localCategoryLabels(skillId);
+
+            // Session 题目的 type 是可信稳定键；预设 Skill 元数据是标签来源。
             List<QaRecord> qaRecords = questions.stream()
-                .map(q -> new QaRecord(q.questionIndex(), q.question(), q.category(), q.userAnswer()))
+                .map(q -> new QaRecord(q.questionIndex(), q.question(),
+                    q.type() != null && !q.type().isBlank() ? q.type() : "OTHER",
+                    q.type() != null ? localLabels.getOrDefault(q.type(), q.category()) : q.category(),
+                    q.userAnswer()))
                 .toList();
 
             String referenceContext = skillService.buildEvaluationReferenceSectionSafe(
-                persistenceService.findBySessionIdInternal(sessionId)
-                    .map(s -> s.getSkillId())
-                    .orElse(null)
+                skillId
             );
 
             // 调用通用评估服务
@@ -74,17 +82,34 @@ public class AnswerEvaluationService {
         }
     }
 
+    private Map<String, String> localCategoryLabels(String skillId) {
+        if (skillId == null) {
+            return Map.of();
+        }
+        try {
+            return skillService.getSkill(skillId).categories().stream()
+                .collect(Collectors.toMap(
+                    InterviewSkillService.SkillCategoryDTO::key,
+                    InterviewSkillService.SkillCategoryDTO::label,
+                    (first, ignored) -> first));
+        } catch (BusinessException e) {
+            // 自定义 Skill 未注册在预设表中；会话题目保存的标签仍可用。
+            return Map.of();
+        }
+    }
+
     private InterviewReportDTO toInterviewReportDTO(EvaluationReport report) {
         return new InterviewReportDTO(
             report.sessionId(),
             report.totalQuestions(),
             report.overallScore(),
             report.categoryScores().stream()
-                .map(cs -> new CategoryScore(cs.category(), cs.score(), cs.questionCount()))
+                .map(cs -> new CategoryScore(cs.categoryKey(), cs.categoryLabel(),
+                    cs.score(), cs.questionCount()))
                 .toList(),
             report.questionDetails().stream()
-                .map(qe -> new QuestionEvaluation(qe.questionIndex(), qe.question(), qe.category(),
-                    qe.userAnswer(), qe.score(), qe.feedback()))
+                .map(qe -> new QuestionEvaluation(qe.questionIndex(), qe.question(),
+                    qe.categoryKey(), qe.categoryLabel(), qe.userAnswer(), qe.score(), qe.feedback()))
                 .toList(),
             report.overallFeedback(),
             report.strengths(),

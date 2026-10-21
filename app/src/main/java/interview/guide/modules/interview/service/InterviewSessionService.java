@@ -351,7 +351,7 @@ public class InterviewSessionService {
         try {
             persistenceService.saveAnswer(
                 request.sessionId(), index,
-                question.question(), question.category(),
+                question.question(), question.type(), question.category(),
                 request.answer(), 0, null  // 分数在报告生成时更新
             );
             persistenceService.updateCurrentQuestionIndex(request.sessionId(), newIndex);
@@ -406,7 +406,7 @@ public class InterviewSessionService {
         try {
             persistenceService.saveAnswer(
                 request.sessionId(), index,
-                question.question(), question.category(),
+                question.question(), question.type(), question.category(),
                 request.answer(), 0, null
             );
             persistenceService.markInProgressIfUnfinished(request.sessionId());

@@ -46,7 +46,7 @@ class FlywayBaselineIntegrationTest {
     JdbcTemplate jdbc = database("clean_install");
     Flyway flyway = flyway("clean_install");
 
-    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
     assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = ?",
         String.class, "public")).containsExactlyInAnyOrder(
         "flyway_schema_history", "resumes", "resume_analyses", "resume_analysis_dead_letters",
@@ -118,6 +118,20 @@ class FlywayBaselineIntegrationTest {
         insert into resumes (file_hash, original_filename, uploaded_at)
         values ('legacy-hash', 'legacy.pdf', timestamp '2026-10-19 12:00:00')
         """);
+    jdbc.execute("""
+        insert into interview_sessions (session_id, created_at)
+        values ('legacy-session', timestamp '2026-10-19 12:00:00')
+        """);
+    jdbc.execute("""
+        insert into interview_answers (session_id, question_index, category, answered_at)
+        select id, 0, 'MySQL', timestamp '2026-10-19 12:00:00'
+        from interview_sessions where session_id = 'legacy-session'
+        """);
+    jdbc.execute("""
+        insert into interview_answers (session_id, question_index, category, answered_at)
+        select id, 1, '数据库专题', timestamp '2026-10-19 12:00:00'
+        from interview_sessions where session_id = 'legacy-session'
+        """);
     jdbc.execute("insert into vector_store (content) values ('legacy vector content')");
 
     Flyway stageOne = Flyway.configure()
@@ -132,14 +146,20 @@ class FlywayBaselineIntegrationTest {
           'ADMIN', 'ACTIVE', true, now(), now(), 0)
         """);
     Flyway flyway = flyway("legacy_install");
-    assertThat(flyway.migrate().migrationsExecuted).isOne();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+    assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
     assertThat(jdbc.queryForObject("select type from flyway_schema_history where version = '1'",
         String.class)).isEqualTo("BASELINE");
     assertThat(jdbc.queryForList("select original_filename from resumes", String.class))
         .containsExactly("legacy.pdf");
     assertThat(jdbc.queryForList("select content from vector_store", String.class))
         .containsExactly("legacy vector content");
+    assertThat(jdbc.queryForList("""
+        select category_key from interview_answers order by question_index
+        """, String.class)).containsExactly("MYSQL", "OTHER");
+    assertThat(jdbc.queryForList("""
+        select category_label from interview_answers order by question_index
+        """, String.class)).containsExactly("MySQL", "数据库专题");
     hibernateSchema("legacy_install", "validate");
   }
 
@@ -155,7 +175,7 @@ class FlywayBaselineIntegrationTest {
             "--spring.datasource.username=" + POSTGRES.getUsername(),
             "--spring.datasource.password=" + POSTGRES.getPassword())) {
       assertThat(context.getBean(Flyway.class).info().current().getVersion().getVersion())
-          .isEqualTo("3");
+          .isEqualTo("4");
       assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
           .isEqualTo("validate");
       assertThat(context.getEnvironment().getProperty(

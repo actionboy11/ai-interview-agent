@@ -66,6 +66,8 @@ export interface InterviewReport {
 
 export interface CategoryScore {
   category: string;
+  categoryKey: string;
+  categoryLabel: string;
   score: number;
   questionCount: number;
 }
@@ -74,6 +76,8 @@ export interface QuestionEvaluation {
   questionIndex: number;
   question: string;
   category: string;
+  categoryKey: string;
+  categoryLabel: string;
   userAnswer: string;
   score: number;
   feedback: string;

@@ -26,7 +26,8 @@ public interface InterviewMapper {
      */
     @Mapping(target = "questionIndex", source = "questionIndex", qualifiedByName = "nullIndexToZero")
     @Mapping(target = "question", source = "question")
-    @Mapping(target = "category", source = "category")
+    @Mapping(target = "categoryKey", source = "categoryKey")
+    @Mapping(target = "categoryLabel", source = "categoryLabel")
     @Mapping(target = "userAnswer", source = "userAnswer")
     @Mapping(target = "score", source = "score", qualifiedByName = "nullScoreToZero")
     @Mapping(target = "feedback", source = "feedback")
