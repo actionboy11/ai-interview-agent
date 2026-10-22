@@ -96,22 +96,36 @@ public class InterviewEvaluationDeadLetterService {
         }
 
         InterviewEvaluationDeadLetterEntity deadLetter = requireDeadLetter(id);
-        InterviewSessionEntity session =
-            sessionRepository.findByOwnerIdAndSessionId(currentUser.requireUserId(), deadLetter.getSessionId()).orElse(null);
-        if (session == null) {
+        var ownerId = currentUser.requireUserId();
+        ReplaySessionResult sessionResult = transactionalExecutor.callRequiresNew(() -> {
+            InterviewSessionEntity session = sessionRepository
+                .findBySessionIdForDerivation(deadLetter.getSessionId())
+                .filter(value -> value.getOwner().getId().equals(ownerId))
+                .filter(value -> value.getResume() == null
+                    || value.getResume().getOwner().getId().equals(ownerId))
+                .orElse(null);
+            if (session == null) {
+                return ReplaySessionResult.MISSING;
+            }
+            if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+                return ReplaySessionResult.COMPLETED;
+            }
+            session.setEvaluateStatus(AsyncTaskStatus.PENDING);
+            session.setEvaluateError(null);
+            sessionRepository.save(session);
+            return ReplaySessionResult.QUEUED;
+        });
+        if (sessionResult == ReplaySessionResult.MISSING) {
             restorePending(deadLetter);
             throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
         }
-        if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+        if (sessionResult == ReplaySessionResult.COMPLETED) {
             deadLetter.setStatus(InterviewEvaluationDeadLetterStatus.RESOLVED);
             return InterviewEvaluationDeadLetterDTO.from(repository.save(deadLetter));
         }
 
         try {
-            session.setEvaluateStatus(AsyncTaskStatus.PENDING);
-            session.setEvaluateError(null);
-            sessionRepository.save(session);
-            var receipt = publisher.publish(session.getSessionId());
+            var receipt = publisher.publish(deadLetter.getSessionId());
             deadLetter.setReplayMessageId(receipt.messageId().toString());
             deadLetter.setReplayedAt(OffsetDateTime.now());
             deadLetter.setStatus(InterviewEvaluationDeadLetterStatus.REPLAYED);
@@ -120,6 +134,12 @@ public class InterviewEvaluationDeadLetterService {
             restorePending(deadLetter);
             throw exception;
         }
+    }
+
+    private enum ReplaySessionResult {
+        MISSING,
+        COMPLETED,
+        QUEUED
     }
 
     private void restorePending(InterviewEvaluationDeadLetterEntity deadLetter) {

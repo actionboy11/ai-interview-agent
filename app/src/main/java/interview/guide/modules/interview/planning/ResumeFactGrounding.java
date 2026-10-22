@@ -68,14 +68,19 @@ public final class ResumeFactGrounding {
     int from = 0;
     while ((from = lower.indexOf(candidate, from)) >= 0) {
       int end = from + candidate.length();
-      boolean startBoundary = from == 0 || !Character.isLetterOrDigit(lower.charAt(from - 1));
+      boolean startBoundary = from == 0 || !isIdentifierContinuation(lower.charAt(from - 1));
       boolean endBoundary = end == lower.length()
-          || !Character.isLetterOrDigit(lower.charAt(end));
+          || !isIdentifierContinuation(lower.charAt(end));
       if (startBoundary && endBoundary) {
         return true;
       }
       from = end;
     }
     return false;
+  }
+
+  private boolean isIdentifierContinuation(char character) {
+    return Character.isDigit(character) || character == '_'
+        || Character.UnicodeScript.of(character) == Character.UnicodeScript.LATIN;
   }
 }

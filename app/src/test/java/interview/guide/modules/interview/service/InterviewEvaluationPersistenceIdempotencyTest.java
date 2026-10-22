@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.any;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.security.CurrentUserProvider;
@@ -17,6 +19,8 @@ import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,10 +30,12 @@ class InterviewEvaluationPersistenceIdempotencyTest {
 
   private InterviewSessionRepository sessionRepository;
   private InterviewPersistenceService service;
+  private CurrentUserProvider currentUser;
 
   @BeforeEach
   void setUp() {
     sessionRepository = mock(InterviewSessionRepository.class);
+    currentUser = mock(CurrentUserProvider.class);
     InterviewAnswerRepository answerRepository = mock(InterviewAnswerRepository.class);
     when(answerRepository.findBySession_SessionIdOrderByQuestionIndex("session-42"))
         .thenReturn(List.of());
@@ -38,7 +44,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
         answerRepository,
         mock(ResumeRepository.class),
         new ObjectMapper(),
-        mock(CurrentUserProvider.class),
+        currentUser,
         mock(UserRepository.class),
         mock(AbilityMemoryDeletionService.class)
     );
@@ -91,6 +97,41 @@ class InterviewEvaluationPersistenceIdempotencyTest {
 
     assertThat(service.saveReport("missing", report(), "message-1"))
         .isEqualTo(InterviewPersistenceService.CompletionResult.SESSION_MISSING);
+  }
+
+  @Test
+  @DisplayName("两参数完成不得预加载旧实体后在同一持久化上下文覆盖锁定赢家")
+  void ownedCompletionLocksBeforeLoadingSession() {
+    UUID ownerId = UUID.randomUUID();
+    when(currentUser.requireUserId()).thenReturn(ownerId);
+    var stale = new InterviewSessionEntity();
+    stale.setSessionId("session-42");
+    stale.setOwner(UserEntity.builder().id(ownerId).build());
+    stale.setQuestionsJson("[]");
+    stale.setEvaluateStatus(AsyncTaskStatus.FAILED);
+    var winner = new InterviewSessionEntity();
+    winner.setSessionId("session-42");
+    winner.setOwner(UserEntity.builder().id(ownerId).build());
+    winner.setQuestionsJson("[]");
+    winner.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
+    winner.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    winner.setReportJson("winning report");
+    winner.setEvaluationMessageId("winning-message");
+    var preloaded = new AtomicBoolean();
+    when(sessionRepository.findByOwnerIdAndSessionId(ownerId, "session-42"))
+        .thenAnswer(call -> {
+          preloaded.set(true);
+          return Optional.of(stale);
+        });
+    when(sessionRepository.findBySessionIdForDerivation("session-42"))
+        .thenAnswer(call -> Optional.of(preloaded.get() ? stale : winner));
+
+    service.saveReport("session-42", report());
+
+    assertThat(preloaded.get()).isFalse();
+    assertThat(winner.getReportJson()).isEqualTo("winning report");
+    assertThat(winner.getEvaluationMessageId()).isEqualTo("winning-message");
+    verify(sessionRepository, never()).save(any());
   }
 
   private InterviewReportDTO report() {

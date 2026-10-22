@@ -225,8 +225,8 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void saveReport(String sessionId, InterviewReportDTO report) {
-        requireOwnedSession(sessionId);
-        if (saveReport(sessionId, report, UUID.randomUUID().toString())
+        if (completeReport(sessionId, report, UUID.randomUUID().toString(),
+            currentUser.requireUserId())
             == CompletionResult.SESSION_MISSING) {
             throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
         }
@@ -324,8 +324,15 @@ public class InterviewPersistenceService {
         InterviewReportDTO report,
         String messageId
     ) {
+        return completeReport(sessionId, report, messageId, null);
+    }
+
+    private CompletionResult completeReport(String sessionId, InterviewReportDTO report,
+        String messageId, UUID requiredOwnerId) {
         Optional<InterviewSessionEntity> sessionOpt = sessionRepository
             .findBySessionIdForDerivation(sessionId)
+            .filter(session -> requiredOwnerId == null
+                || session.getOwner().getId().equals(requiredOwnerId))
             .filter(session -> session.getQuestionsJson() != null)
             .map(this::validateOwnership);
         if (sessionOpt.isEmpty()) {

@@ -45,6 +45,20 @@ class ResumeFactGroundingTest {
   }
 
   @Test
+  @DisplayName("中文相邻的英文技术名仍匹配实际预设，拉丁标识符内部不匹配")
+  void chineseAdjacentTechnologyFactsKeepResumeGrounding() throws Exception {
+    var python = preset("python-backend");
+    assertThat(grounding.grounded("熟悉Python和Django", python))
+        .contains("PYTHON_BASIC", "DJANGO_FLASK");
+    assertThat(grounding.grounded("CPython、pythonic、djangoish", python)).isEmpty();
+
+    var frontend = preset("frontend");
+    assertThat(grounding.grounded("熟练使用React开发页面", frontend))
+        .containsExactly("REACT_VUE");
+    assertThat(grounding.grounded("ReactNative开发页面", frontend)).isEmpty();
+  }
+
+  @Test
   @DisplayName("英文技术词必须完整匹配，空白与无关简历不产生分类")
   void boundariesAndUnrelatedFacts() throws Exception {
     var categories = preset("python-backend");
