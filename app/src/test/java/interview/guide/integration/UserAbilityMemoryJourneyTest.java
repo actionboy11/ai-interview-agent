@@ -1,12 +1,19 @@
 package interview.guide.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import com.jayway.jsonpath.JsonPath;
+import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.common.ai.PromptSanitizer;
+import interview.guide.common.ai.StructuredOutputInvoker;
+import interview.guide.common.config.LlmProviderProperties;
 import interview.guide.common.exception.GlobalExceptionHandler;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.mapper.AuthResponseMapperImpl;
@@ -21,6 +28,7 @@ import interview.guide.modules.auth.service.CreateAdminUserCommand;
 import interview.guide.modules.auth.service.InviteCodeService;
 import interview.guide.modules.auth.service.UsernameNormalizer;
 import interview.guide.modules.interview.InterviewController;
+import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
@@ -28,13 +36,18 @@ import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
 import interview.guide.modules.interview.planning.model.QuestionPlanningCommand;
 import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
-import interview.guide.modules.interview.planning.service.InterviewQuestionPlanPersistenceService;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
+import interview.guide.infrastructure.redis.InterviewSessionCache;
+import interview.guide.infrastructure.redis.RedisService;
+import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.interview.service.InterviewQuestionProperties;
+import interview.guide.modules.interview.service.InterviewQuestionService;
 import interview.guide.modules.interview.service.InterviewSessionService;
+import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import interview.guide.modules.interview.skill.InterviewSkillService;
-import interview.guide.modules.interview.skill.InterviewSkillService.SkillCategoryDTO;
 import interview.guide.modules.memory.mapper.AbilityMemoryMapperImpl;
 import interview.guide.modules.memory.model.AbilityLevel;
 import interview.guide.modules.memory.repository.AbilityProfileProposalRepository;
@@ -48,11 +61,15 @@ import interview.guide.modules.memory.service.DerivationResult;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.regex.Pattern;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,12 +86,15 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(classes = UserAbilityMemoryJourneyTest.TestApplication.class, properties = {
@@ -95,11 +115,19 @@ class UserAbilityMemoryJourneyTest {
       UsernameNormalizer.class, AuthUserQueryService.class, AuthResponseMapperImpl.class,
       CurrentUserProvider.class, AbilityEvidenceDerivationService.class,
       AbilityMemoryDeletionService.class, InterviewPersistenceService.class,
+      InterviewSessionService.class, InterviewQuestionService.class,
+      InterviewSessionCache.class, InterviewSkillService.class,
       AbilityProfileCommandService.class, AbilityProfileQueryService.class,
       AbilityScorePolicy.class, AbilityMemoryMapperImpl.class, InterviewController.class,
       GlobalExceptionHandler.class})
   static class TestApplication {
     @Bean ObjectMapper objectMapper() { return new ObjectMapper(); }
+    @Bean InterviewQuestionProperties interviewQuestionProperties() {
+      return new InterviewQuestionProperties();
+    }
+    @Bean PromptSanitizer promptSanitizer() {
+      return new PromptSanitizer(new LlmProviderProperties());
+    }
   }
 
   @Autowired AdminAccountService accounts;
@@ -110,17 +138,43 @@ class UserAbilityMemoryJourneyTest {
   @Autowired AbilityProfileCommandService decisions;
   @MockitoSpyBean AbilityProfileQueryService memory;
   @Autowired QuestionPlanningService planning;
-  @Autowired InterviewQuestionPlanPersistenceService persistence;
   @Autowired InterviewQuestionPlanRepository plans;
   @Autowired InterviewSessionRepository sessions;
   @Autowired AbilityProfileProposalRepository proposals;
   @Autowired UserAbilityProfileRepository profiles;
   @Autowired ResumeRepository resumes;
   @Autowired WebApplicationContext web;
-  @MockitoBean InterviewSkillService skills;
-  @MockitoBean InterviewSessionService interviewSessions;
+  @Autowired ObjectMapper mapper;
+  @Autowired InterviewSkillService skills;
   @MockitoBean InterviewHistoryService history;
   @Autowired InterviewPersistenceService interviewPersistence;
+  @MockitoBean RedisService redis;
+  @MockitoBean InterviewEvaluationTaskPublisher evaluationTasks;
+  @MockitoBean MemoryDerivationPublicationService memoryPublication;
+  @MockitoBean AnswerEvaluationService evaluation;
+  @MockitoBean LlmProviderRegistry llm;
+  @MockitoBean StructuredOutputInvoker invoker;
+  private final ConcurrentLinkedQueue<String> modelPrompts = new ConcurrentLinkedQueue<>();
+
+  @BeforeEach
+  void fakeExternalQuestionModel() {
+    modelPrompts.clear();
+    when(llm.getChatClientOrDefault(any())).thenReturn(mock(ChatClient.class));
+    when(invoker.invoke(any(), anyString(), anyString(), any(), any(),
+        anyString(), anyString(), any())).thenAnswer(call -> {
+      String prompt = call.getArgument(2);
+      modelPrompts.add(prompt);
+      var matcher = Pattern.compile("slotId=(slot-\\d+); categoryKey=([A-Z_]+)").matcher(prompt);
+      var output = new ArrayList<InterviewQuestionService.QuestionDTO>();
+      while (matcher.find()) {
+        output.add(new InterviewQuestionService.QuestionDTO(
+            "Question for " + matcher.group(2), matcher.group(2), matcher.group(2),
+            matcher.group(1), null, List.of()));
+      }
+      assertThat(output).isNotEmpty();
+      return new InterviewQuestionService.QuestionListDTO(output);
+    });
+  }
 
   @AfterEach
   void clearIdentity() {
@@ -142,16 +196,23 @@ class UserAbilityMemoryJourneyTest {
     assertThat(resumes.findByOwnerIdAndId(a.getId(), bResume.getId())).isEmpty();
     assertThat(resumes.findByOwnerIdAndId(b.getId(), aResume.getId())).isEmpty();
 
-    String evaluated = UUID.randomUUID().toString();
     authenticate(a);
-    InterviewSessionEntity first = interviewPersistence.saveSession(evaluated, null, 1,
-        List.of(InterviewQuestionDTO.planned(0, "Explain index usage", "MYSQL", "MySQL",
-            "Index usage", false, null, "slot-01")), null, "java-backend", "mid");
-    interviewPersistence.saveAnswer(evaluated, 0, "Explain index usage", "MYSQL", "MySQL",
+    MockMvc mvc = MockMvcBuilders.webAppContextSetup(web).build();
+    String evaluated = createInterview(mvc, aResume.getId());
+    InterviewSessionEntity first = sessions.findByOwnerIdAndSessionId(a.getId(), evaluated)
+        .orElseThrow();
+    List<InterviewQuestionDTO> firstQuestions = mapper.readValue(first.getQuestionsJson(),
+        new TypeReference<>() {});
+    InterviewQuestionDTO firstMysql = firstQuestions.stream()
+        .filter(question -> "MYSQL".equals(question.type())).findFirst().orElseThrow();
+    interviewPersistence.saveAnswer(evaluated, firstMysql.questionIndex(), firstMysql.question(),
+        "MYSQL", "MySQL",
         "uncertain answer", 30, "Needs practice");
     assertThat(interviewPersistence.saveReport(evaluated, new InterviewReportDTO(evaluated,
-        1, 30, List.of(new InterviewReportDTO.CategoryScore("MYSQL", "MySQL", 30, 1)),
-        List.of(new InterviewReportDTO.QuestionEvaluation(0, "Explain index usage", "MYSQL",
+        firstQuestions.size(), 30,
+        List.of(new InterviewReportDTO.CategoryScore("MYSQL", "MySQL", 30, 1)),
+        List.of(new InterviewReportDTO.QuestionEvaluation(firstMysql.questionIndex(),
+            firstMysql.question(), "MYSQL",
             "MySQL", "uncertain answer", 30, "Needs practice")), "Practice indexes",
         List.of(), List.of("Index usage"), List.of()), UUID.randomUUID().toString()))
         .isEqualTo(InterviewPersistenceService.CompletionResult.CREATED);
@@ -163,8 +224,6 @@ class UserAbilityMemoryJourneyTest {
     assertThat(proposed).hasSize(1);
     assertThat(memory.profiles(a.getId(), "java-backend")).isEmpty();
 
-    when(skills.calculateAllocation(anyList(), anyInt()))
-        .thenReturn(Map.of("MYSQL", 4, "JAVA", 3, "REDIS", 3));
     authenticate(a);
     assertThat(planning.plan(command()).mode()).isEqualTo(PlanningMode.FIXED);
     decisions.acceptWithEdit(a.getId(), proposed.getFirst().getId(),
@@ -177,33 +236,66 @@ class UserAbilityMemoryJourneyTest {
       assertThat(slot.purpose().name()).isEqualTo("WEAKNESS_REINFORCEMENT");
     });
 
-    String next = UUID.randomUUID().toString();
-    persistence.createShell(next, a.getId(), aResume.getId(), null, "java-backend", "mid", selected);
-    List<InterviewQuestionDTO> generated = selected.slots().stream()
-        .map(slot -> InterviewQuestionDTO.planned(selected.slots().indexOf(slot),
-            "Question for " + slot.categoryKey(), slot.categoryKey(), slot.categoryKey(),
-            null, false, null, slot.slotId())).toList();
-    persistence.finish(next, a.getId(), generated);
-    MockMvc mvc = MockMvcBuilders.webAppContextSetup(web).build();
+    String next = createInterview(mvc, aResume.getId());
     String body = mvc.perform(get("/api/interview/sessions/{id}/plan", next))
         .andReturn().getResponse().getContentAsString();
-    assertThat(body).contains("WEAKNESS_REINFORCEMENT", "MYSQL", "巩固");
+    assertThat((String) JsonPath.read(body, "$.data.mode")).isEqualTo("ADAPTIVE");
+    Map<String, Integer> counts = JsonPath.read(body, "$.data.purposeCounts");
+    assertThat(counts).isEqualTo(Map.of("MANDATORY", 1, "BASELINE", 5,
+        "WEAKNESS_REINFORCEMENT", 3, "EXPLORATION", 1, "STRENGTH_CALIBRATION", 0));
+    List<Map<String, Object>> reasons = JsonPath.read(body, "$.data.questions");
+    var mysqlWeak = reasons.stream().filter(reason ->
+        "MYSQL".equals(reason.get("categoryKey"))
+            && "WEAKNESS_REINFORCEMENT".equals(reason.get("purpose"))).toList();
+    assertThat(mysqlWeak).hasSize(3).allSatisfy(reason ->
+        assertThat(reason.get("reason")).isEqualTo("巩固已确认的薄弱项"));
+    List<InterviewQuestionDTO> savedQuestions = mapper.readValue(sessions
+        .findByOwnerIdAndSessionId(a.getId(), next).orElseThrow().getQuestionsJson(),
+        new TypeReference<>() {});
+    assertThat(savedQuestions).hasSize(10);
+    for (var reason : mysqlWeak) {
+      assertThat(savedQuestions).anySatisfy(question -> {
+        assertThat(question.questionIndex()).isEqualTo(reason.get("questionIndex"));
+        assertThat(question.slotId()).isEqualTo(reason.get("slotId"));
+        assertThat(question.type()).isEqualTo("MYSQL");
+      });
+    }
+    assertThat(modelPrompts).anySatisfy(prompt ->
+        assertThat(prompt).contains("purpose=WEAKNESS_REINFORCEMENT"));
     assertThat(body).doesNotContain("MYSQL_INTERNAL_MEMORY_SECRET", "focusTopics", "avoidedTopics");
     assertThat(plans.findFirstByOwnerIdAndSessionSessionIdOrderByIdDesc(a.getId(), next)).isPresent();
 
-    profiles.findByOwnerIdAndSkillIdAndCategoryKey(a.getId(), "java-backend", "MYSQL")
-        .ifPresent(profile -> { profile.setSummary("UPDATED_PRIVATE_MEMORY"); profiles.saveAndFlush(profile); });
+    var profile = profiles.findByOwnerIdAndSkillIdAndCategoryKey(a.getId(),
+        "java-backend", "MYSQL").orElseThrow();
+    profile.setSummary("UPDATED_PRIVATE_MEMORY");
+    profiles.saveAndFlush(profile);
+    assertThat(profiles.findByOwnerIdAndSkillIdAndCategoryKey(a.getId(),
+        "java-backend", "MYSQL").orElseThrow().getSummary())
+        .isEqualTo("UPDATED_PRIVATE_MEMORY");
     assertThat(mvc.perform(get("/api/interview/sessions/{id}/plan", next))
-        .andReturn().getResponse().getContentAsString()).isEqualTo(body);
+        .andReturn().getResponse().getContentAsString()).isEqualTo(body)
+        .doesNotContain("UPDATED_PRIVATE_MEMORY");
     authenticate(b);
     assertThat(mvc.perform(get("/api/interview/sessions/{id}/plan", next))
-        .andReturn().getResponse().getContentAsString()).doesNotContain("WEAKNESS_REINFORCEMENT");
+        .andReturn().getResponse().getContentAsString()).contains("\"code\":3001")
+        .doesNotContain("MYSQL_INTERNAL_MEMORY_SECRET");
     assertThat(planning.plan(command()).mode()).isEqualTo(PlanningMode.FIXED);
+    String bInterview = createInterview(mvc, bResume.getId());
+    String bPlan = mvc.perform(get("/api/interview/sessions/{id}/plan", bInterview))
+        .andReturn().getResponse().getContentAsString();
+    assertThat((String) JsonPath.read(bPlan, "$.data.mode")).isEqualTo("FIXED");
+    assertThat((Integer) JsonPath.read(bPlan,
+        "$.data.purposeCounts.WEAKNESS_REINFORCEMENT")).isZero();
 
     authenticate(a);
     doThrow(new IllegalStateException("temporary memory read failure"))
         .when(memory).profiles(a.getId(), "java-backend");
-    assertThat(planning.plan(command()).mode()).isEqualTo(PlanningMode.FIXED);
+    String fallback = createInterview(mvc, aResume.getId());
+    String fixedPlan = mvc.perform(get("/api/interview/sessions/{id}/plan", fallback))
+        .andReturn().getResponse().getContentAsString();
+    assertThat((String) JsonPath.read(fixedPlan, "$.data.mode")).isEqualTo("FIXED");
+    assertThat((Integer) JsonPath.read(fixedPlan,
+        "$.data.purposeCounts.WEAKNESS_REINFORCEMENT")).isZero();
   }
 
   @Test
@@ -229,6 +321,18 @@ class UserAbilityMemoryJourneyTest {
   private UserEntity invited(UserEntity admin, String username) {
     String code = invites.issue(Duration.ofHours(1), admin.getId()).rawCode();
     return invites.register(code, username, "journey-password", username);
+  }
+
+  private String createInterview(MockMvc mvc, Long resumeId) throws Exception {
+    String response = mvc.perform(post("/api/interview/sessions")
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(mapper.writeValueAsString(new CreateInterviewRequest(null, 10,
+            resumeId, true, null, "java-backend", "mid", null, null))))
+        .andReturn().getResponse().getContentAsString();
+    assertThat((Integer) JsonPath.read(response, "$.code"))
+        .as("createSession response=%s", response)
+        .isEqualTo(200);
+    return JsonPath.read(response, "$.data.sessionId");
   }
 
   private void authenticate(UserEntity user) {
@@ -263,10 +367,7 @@ class UserAbilityMemoryJourneyTest {
   }
 
   private QuestionPlanningCommand command() {
-    return new QuestionPlanningCommand("java-backend", List.of(
-        new SkillCategoryDTO("MYSQL", "MySQL", "CORE", null, false),
-        new SkillCategoryDTO("JAVA", "Java", "CORE", null, false),
-        new SkillCategoryDTO("REDIS", "Redis", "CORE", null, false)),
+    return new QuestionPlanningCommand("java-backend", skills.getSkill("java-backend").categories(),
         10, "mid", false, Map.of(), List.of(), Set.of());
   }
 }
