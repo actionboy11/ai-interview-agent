@@ -3,6 +3,7 @@ package interview.guide.modules.auth.service;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.model.RegistrationInviteEntity;
+import interview.guide.modules.auth.dto.InviteMetadataResponse;
 import interview.guide.modules.auth.model.RegistrationInviteStatus;
 import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.auth.model.UserRole;
@@ -22,6 +23,8 @@ import java.util.HexFormat;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -31,6 +34,24 @@ public class InviteCodeService {
   private final UserRepository users;
   private final AdminAccountService accounts;
   private final SecureRandom random = new SecureRandom();
+
+  @Transactional(readOnly = true)
+  public Page<InviteMetadataResponse> list(int page, int size) {
+    if (page < 0 || size < 1 || size > 100) {
+      throw new BusinessException(ErrorCode.AUTH_INVALID_INPUT, "查询参数无效");
+    }
+    return invites.findAllByOrderByCreatedAtDesc(PageRequest.of(page, size)).map(invite ->
+        new InviteMetadataResponse(invite.getId(), invite.getStatus(), invite.getExpiresAt(),
+            invite.getCreatedBy().getId(), invite.getCreatedAt(), invite.getUsedAt(),
+            invite.getUsedBy() == null ? null : invite.getUsedBy().getId()));
+  }
+
+  @Transactional
+  public void revoke(UUID id) {
+    if (id == null || invites.revokeActiveInvite(id, Instant.now()) != 1) {
+      throw new BusinessException(ErrorCode.AUTH_INVITE_INVALID, "邀请码不存在或已使用、已撤销");
+    }
+  }
 
   @Transactional
   public IssuedInvite issue(Duration ttl, UUID adminUserId) {

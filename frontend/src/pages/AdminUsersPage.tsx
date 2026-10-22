@@ -1,11 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Ban, CheckCircle2, KeyRound, Loader2, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { adminApi } from '../api/auth';
 import { getErrorMessage } from '../api/request';
 import { authButtonClass, authInputClass } from '../components/AuthPageShell';
 import { useAuth } from '../hooks/useAuth';
 import { isSameUserId } from '../utils/userId';
-import type { AdminUser, IssuedInvite, UserRole, UserStatus } from '../types/auth';
+import type { AdminUser, InviteMetadata, IssuedInvite, UserRole, UserStatus } from '../types/auth';
 
 export default function AdminUsersPage() {
   const { currentUser } = useAuth();
@@ -17,12 +17,52 @@ export default function AdminUsersPage() {
   const [ttlHours, setTtlHours] = useState(24);
   const [invite, setInvite] = useState<IssuedInvite | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [userPage, setUserPage] = useState(0);
+  const [userPages, setUserPages] = useState(0);
+  const [userTotal, setUserTotal] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [invites, setInvites] = useState<InviteMetadata[]>([]);
+  const [invitePage, setInvitePage] = useState(0);
+  const [invitePages, setInvitePages] = useState(0);
+  const [invitesLoading, setInvitesLoading] = useState(true);
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const busy = pending !== '';
   const cardClass = 'rounded-2xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900';
   const labelClass = 'block text-sm font-medium text-slate-600 dark:text-slate-300';
+
+  const refreshUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const result = await adminApi.listUsers({ search, page: userPage, size: 20 });
+      setUsers(result.content);
+      setUserPages(result.totalPages);
+      setUserTotal(result.totalElements);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const refreshInvites = async () => {
+    setInvitesLoading(true);
+    try {
+      const result = await adminApi.listInvites({ page: invitePage, size: 20 });
+      setInvites(result.content);
+      setInvitePages(result.totalPages);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  useEffect(() => { void refreshUsers(); }, [search, userPage]);
+  useEffect(() => { void refreshInvites(); }, [invitePage]);
 
   const createUser = async (event: FormEvent) => {
     event.preventDefault();
@@ -31,7 +71,7 @@ export default function AdminUsersPage() {
     setSuccess('');
     try {
       const user = await adminApi.createUser({ username, displayName, password, role });
-      setUsers(previous => [user, ...previous]);
+      await refreshUsers();
       setUsername('');
       setDisplayName('');
       setSuccess(`已创建 ${user.displayName}，首次登录需修改临时密码。`);
@@ -43,8 +83,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  const changeStatus = async (status: UserStatus) => {
-    const id = targetId.trim();
+  const changeStatus = async (status: UserStatus, id = targetId.trim()) => {
     if (!id || !currentUser || (status === 'DISABLED' && isSameUserId(id, currentUser.id))) {
       setError('不能禁用当前登录账号');
       return;
@@ -55,6 +94,7 @@ export default function AdminUsersPage() {
     try {
       await (status === 'ACTIVE' ? adminApi.enableUser(id) : adminApi.disableUser(id, currentUser.id));
       setUsers(previous => previous.map(user => isSameUserId(user.id, id) ? { ...user, status } : user));
+      await refreshUsers();
       setSuccess(status === 'ACTIVE' ? '账号已启用。' : '账号已禁用，现有会话已失效。');
     } catch (err) {
       setError(getErrorMessage(err));
@@ -71,8 +111,25 @@ export default function AdminUsersPage() {
     setInvite(null);
     try {
       setInvite(await adminApi.issueInvite({ ttlSeconds: ttlHours * 3600 }));
+      await refreshInvites();
     } catch (err) {
       setError(getErrorMessage(err));
+    } finally {
+      setPending('');
+    }
+  };
+
+  const revokeInvite = async (id: string) => {
+    setPending(`revoke-${id}`);
+    setError('');
+    setSuccess('');
+    try {
+      await adminApi.revokeInvite(id);
+      await refreshInvites();
+      setSuccess('邀请码已撤销。');
+    } catch (err) {
+      setError(getErrorMessage(err));
+      await refreshInvites();
     } finally {
       setPending('');
     }
@@ -125,9 +182,18 @@ export default function AdminUsersPage() {
         </div>
       </div>
       <section className={cardClass}>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">本页新建用户</h2>
-        <p className="mt-1 text-sm text-slate-500">仅保留当前页面内的创建记录，刷新或离开后清空。</p>
-        {users.length === 0 ? <p className="py-6 text-sm text-slate-400">暂无新建记录</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 dark:text-slate-300"><thead><tr className="border-b border-slate-100 dark:border-slate-700"><th className="p-3">用户</th><th className="p-3">角色</th><th className="p-3">状态</th><th className="p-3">UUID</th></tr></thead><tbody>{users.map(user => <tr key={user.id} className="border-b border-slate-100 dark:border-slate-700"><td className="p-3">{user.displayName}<span className="block text-xs text-slate-400">{user.username}</span></td><td className="p-3">{user.role === 'ADMIN' ? '管理员' : '普通用户'}</td><td className="p-3">{user.status === 'ACTIVE' ? '已启用' : '已禁用'}</td><td className="p-3"><button onClick={() => setTargetId(user.id)} className="font-mono text-xs text-primary-600 hover:underline" title="填入账号操作">{user.id}</button></td></tr>)}</tbody></table></div>}
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">已有账号</h2>
+        <form onSubmit={event => { event.preventDefault(); setUserPage(0); setSearch(searchInput.trim()); }} className="mt-4 flex gap-2">
+          <input aria-label="搜索用户名或显示名称" placeholder="搜索用户名或显示名称" maxLength={100} value={searchInput} onChange={event => setSearchInput(event.target.value)} className={authInputClass} />
+          <button className="rounded-xl bg-primary-600 px-4 text-sm text-white">搜索</button>
+        </form>
+        {usersLoading ? <p role="status" className="py-6 text-sm text-slate-500">正在加载账号…</p> : users.length === 0 ? <p className="py-6 text-sm text-slate-400">没有匹配的账号</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 dark:text-slate-300"><thead><tr className="border-b border-slate-100 dark:border-slate-700"><th className="p-3">用户</th><th className="p-3">角色</th><th className="p-3">状态</th><th className="p-3">UUID</th><th className="p-3">操作</th></tr></thead><tbody>{users.map(user => <tr key={user.id} className="border-b border-slate-100 dark:border-slate-700"><td className="p-3">{user.displayName}<span className="block text-xs text-slate-400">{user.username}</span></td><td className="p-3">{user.role === 'ADMIN' ? '管理员' : '普通用户'}</td><td className="p-3">{user.status === 'ACTIVE' ? '已启用' : '已禁用'}</td><td className="p-3"><button onClick={() => setTargetId(user.id)} className="font-mono text-xs text-primary-600 hover:underline" title="填入账号操作">{user.id}</button></td><td className="p-3"><button disabled={busy || (user.status === 'ACTIVE' && isSameUserId(user.id, currentUser?.id))} onClick={() => { setTargetId(user.id); void changeStatus(user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE', user.id); }} className="text-primary-600 disabled:opacity-50">{user.status === 'ACTIVE' ? '禁用' : '启用'}</button></td></tr>)}</tbody></table></div>}
+        <div className="mt-4 flex items-center justify-between text-sm text-slate-500"><span>共 {userTotal} 个账号</span><div className="flex gap-3"><button disabled={userPage === 0 || usersLoading} onClick={() => setUserPage(page => page - 1)}>上一页</button><span>{userPages === 0 ? 0 : userPage + 1} / {userPages}</span><button disabled={userPage + 1 >= userPages || usersLoading} onClick={() => setUserPage(page => page + 1)}>下一页</button></div></div>
+      </section>
+      <section className={cardClass}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">已签发邀请码</h2>
+        {invitesLoading ? <p role="status" className="py-6 text-sm text-slate-500">正在加载邀请码…</p> : invites.length === 0 ? <p className="py-6 text-sm text-slate-400">暂无邀请码</p> : <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm text-slate-600 dark:text-slate-300"><thead><tr className="border-b border-slate-100 dark:border-slate-700"><th className="p-3">编号</th><th className="p-3">状态</th><th className="p-3">签发时间</th><th className="p-3">到期时间</th><th className="p-3">操作</th></tr></thead><tbody>{invites.map(item => <tr key={item.id} className="border-b border-slate-100 dark:border-slate-700"><td className="p-3 font-mono text-xs">{item.id}</td><td className="p-3">{item.status === 'ACTIVE' && Date.parse(item.expiresAt) <= Date.now() ? '已过期' : ({ ACTIVE: '可使用', USED: '已使用', REVOKED: '已撤销', EXPIRED: '已过期' }[item.status])}</td><td className="p-3">{new Date(item.createdAt).toLocaleString()}</td><td className="p-3">{new Date(item.expiresAt).toLocaleString()}</td><td className="p-3"><button disabled={busy || item.status !== 'ACTIVE'} onClick={() => void revokeInvite(item.id)} className="text-red-600 disabled:opacity-50">{pending === `revoke-${item.id}` ? '撤销中…' : '撤销'}</button></td></tr>)}</tbody></table></div>}
+        <div className="mt-4 flex justify-end gap-3 text-sm text-slate-500"><button disabled={invitePage === 0 || invitesLoading} onClick={() => setInvitePage(page => page - 1)}>上一页</button><span>{invitePages === 0 ? 0 : invitePage + 1} / {invitePages}</span><button disabled={invitePage + 1 >= invitePages || invitesLoading} onClick={() => setInvitePage(page => page + 1)}>下一页</button></div>
       </section>
     </div>
   );

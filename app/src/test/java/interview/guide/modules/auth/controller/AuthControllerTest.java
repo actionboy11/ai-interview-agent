@@ -29,7 +29,7 @@ class AuthControllerTest extends AuthWebTestSupport {
     mvc.perform(browser.read(get("/api/auth/me")))
         .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(user.getId().toString()))
         .andExpect(jsonPath("$.data.role").value("USER"))
-        .andExpect(jsonPath("$.data.mustChangePassword").value(true))
+        .andExpect(jsonPath("$.data.mustChangePassword").value(false))
         .andExpect(jsonPath("$.data.passwordHash").doesNotExist());
   }
 

@@ -94,6 +94,25 @@ class InviteCodeServiceTest extends AuthServiceTestSupport {
   }
 
   @Test
+  @DisplayName("管理员可查询安全元数据并撤销未使用邀请码，撤销后不能注册")
+  void listsAndRevokesActiveInvite() {
+    var admin = createUser("Admin", UserRole.ADMIN);
+    var issued = inviteCodes.issue(Duration.ofHours(1), admin.getId());
+    var listing = inviteCodes.list(0, 20);
+    assertThat(listing.getContent()).hasSize(1);
+    assertThat(listing.getContent().getFirst().id()).isEqualTo(issued.id());
+    assertThat(listing.getContent().getFirst().toString()).doesNotContain(issued.rawCode());
+    assertThat(listing.getContent().getFirst().toString()).doesNotContain(
+        invites.findById(issued.id()).orElseThrow().getInviteHash());
+    inviteCodes.revoke(issued.id());
+    assertThat(invites.findById(issued.id()).orElseThrow().getStatus())
+        .isEqualTo(RegistrationInviteStatus.REVOKED);
+    assertThatThrownBy(() -> inviteCodes.register(issued.rawCode(), "Alice", "password", "Alice"))
+        .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode())
+            .isEqualTo(ErrorCode.AUTH_INVITE_INVALID.getCode()));
+  }
+
+  @Test
   @DisplayName("两个并发注册事务仅一个成功且失败用户不会残留")
   void concurrentRegistrationHasOneWinner() throws Exception {
     var admin = createUser("Admin", UserRole.ADMIN);
@@ -111,6 +130,40 @@ class InviteCodeServiceTest extends AuthServiceTestSupport {
       assertThat(users.count()).isEqualTo(2);
       assertThat(invites.findById(issued.id()).orElseThrow().getStatus())
           .isEqualTo(RegistrationInviteStatus.USED);
+    } finally {
+      start.countDown();
+    }
+  }
+
+  @Test
+  @DisplayName("撤销与兑换竞争只能产生已撤销或已使用其中一种持久化结果")
+  void revokeAndRedeemHaveExactlyOneOutcome() throws Exception {
+    var admin = createUser("Admin", UserRole.ADMIN);
+    var issued = inviteCodes.issue(Duration.ofHours(1), admin.getId());
+    var ready = new CountDownLatch(2);
+    var start = new CountDownLatch(1);
+    try (var executor = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>())) {
+      var revoke = executor.submit(() -> {
+        ready.countDown();
+        start.await();
+        try {
+          inviteCodes.revoke(issued.id());
+          return true;
+        } catch (BusinessException error) {
+          assertThat(error.getCode()).isEqualTo(ErrorCode.AUTH_INVITE_INVALID.getCode());
+          return false;
+        }
+      });
+      var redeem = executor.submit(() -> compete(ready, start, issued.rawCode(), "Alice"));
+      assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      boolean revoked = revoke.get(10, TimeUnit.SECONDS);
+      boolean redeemed = redeem.get(10, TimeUnit.SECONDS);
+      assertThat(revoked).isNotEqualTo(redeemed);
+      assertThat(invites.findById(issued.id()).orElseThrow().getStatus())
+          .isEqualTo(revoked ? RegistrationInviteStatus.REVOKED : RegistrationInviteStatus.USED);
+      assertThat(users.count()).isEqualTo(redeemed ? 2 : 1);
     } finally {
       start.countDown();
     }

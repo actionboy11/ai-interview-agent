@@ -6,6 +6,7 @@ import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.auth.model.UserRole;
 import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.auth.repository.UserRepository;
+import interview.guide.modules.auth.dto.AdminUserResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
@@ -13,6 +14,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -39,6 +43,20 @@ public class AdminAccountService {
   @Transactional
   public void enable(UUID userId) {
     setStatus(userId, UserStatus.ACTIVE);
+  }
+
+  @Transactional(readOnly = true)
+  public Page<AdminUserResponse> list(String search, int page, int size) {
+    if (page < 0 || size < 1 || size > 100 || (search != null && search.length() > 100)) {
+      throw new BusinessException(ErrorCode.AUTH_INVALID_INPUT, "查询参数无效");
+    }
+    String term = search == null ? "" : search.strip().toLowerCase(java.util.Locale.ROOT);
+    return users.searchAccounts(term, PageRequest.of(page, size,
+        Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id"))))
+        .map(user -> new AdminUserResponse(user.getId(), user.getUsername(),
+            user.getDisplayName(), user.getRole(), user.getStatus(),
+            user.isMustChangePassword(), user.getCreatedAt(), user.getUpdatedAt(),
+            user.getLastLoginAt()));
   }
 
   // Both callers are Service transaction boundaries; invite consumption joins this same transaction.

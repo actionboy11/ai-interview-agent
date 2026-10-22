@@ -49,6 +49,25 @@ test('管理操作遵守现有后端路径和 DTO', async () => {
   assert.deepEqual(calls[3].data, { ttlSeconds: 3600 });
 });
 
+test('管理员账号搜索与邀请码撤销使用持久化查询接口', async () => {
+  const calls: { url: string; params: unknown; data: unknown }[] = [];
+  request.getInstance().defaults.adapter = async config => {
+    if (config.url === '/api/auth/csrf') {
+      return { data: { code: 200, message: 'success', data: { headerName: 'X-XSRF-TOKEN', token: 'admin-token' } }, status: 200, statusText: 'OK', headers: {}, config };
+    }
+    calls.push({ url: config.url!, params: config.params, data: config.data });
+    return { data: { code: 200, message: 'success', data: { content: [], totalElements: 0, totalPages: 0 } }, status: 200, statusText: 'OK', headers: {}, config };
+  };
+  await adminApi.listUsers({ search: 'invited', page: 1, size: 20 });
+  await adminApi.listInvites({ page: 0, size: 20 });
+  await adminApi.revokeInvite('invite-id');
+  assert.deepEqual(calls.map(call => call.url), [
+    '/api/admin/users', '/api/admin/invites', '/api/admin/invites/invite-id/revoke',
+  ]);
+  assert.deepEqual(calls[0].params, { search: 'invited', page: 1, size: 20 });
+  assert.deepEqual(calls[1].params, { page: 0, size: 20 });
+});
+
 test('当前管理员 UUID 的大小写变体不能发出禁用请求', async () => {
   const calls: string[] = [];
   request.getInstance().defaults.adapter = async config => {

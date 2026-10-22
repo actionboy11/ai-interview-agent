@@ -45,3 +45,22 @@ export interface IssuedInvite {
   rawCode: string;
   expiresAt: string;
 }
+
+export interface PageResponse<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+}
+
+export type InviteStatus = 'ACTIVE' | 'USED' | 'REVOKED' | 'EXPIRED';
+
+export interface InviteMetadata {
+  id: string;
+  status: InviteStatus;
+  expiresAt: string;
+  createdById: string;
+  createdAt: string;
+  usedAt: string | null;
+  usedById: string | null;
+}

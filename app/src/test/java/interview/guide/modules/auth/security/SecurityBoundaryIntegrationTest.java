@@ -5,6 +5,9 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
 import interview.guide.modules.auth.model.UserRole;
 import interview.guide.modules.auth.model.UserStatus;
+import interview.guide.modules.auth.service.CreateAdminUserCommand;
+import interview.guide.modules.auth.service.InviteCodeService;
+import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("默认拒绝、CSRF、CORS 与禁用安全边界")
 public class SecurityBoundaryIntegrationTest extends AuthWebTestSupport {
   @Autowired CurrentUserProvider currentUsers;
+  @Autowired InviteCodeService inviteCodes;
 
   @Test
   @DisplayName("应用认证机制使 Boot 默认账号自动配置退出")
@@ -145,6 +149,63 @@ public class SecurityBoundaryIntegrationTest extends AuthWebTestSupport {
     mvc.perform(admin.mutate(post("/api/admin/users/" + target.getId() + "/enable")))
         .andExpect(jsonPath("$.code").value(200));
     login("target");
+  }
+
+  @Test
+  @DisplayName("临时密码会话仅能读取本人身份和令牌、改密及登出，改密后恢复业务访问")
+  void temporaryPasswordIsEnforcedByServer() throws Exception {
+    accounts.createUser(new CreateAdminUserCommand("temporary", "secret-password",
+        "Temporary", UserRole.ADMIN));
+    var browser = login("temporary");
+    mvc.perform(browser.read(get("/api/auth/me")))
+        .andExpect(jsonPath("$.data.mustChangePassword").value(true));
+    mvc.perform(browser.read(get("/api/auth/csrf"))).andExpect(jsonPath("$.code").value(200));
+    mvc.perform(browser.read(get("/api/owner-probe/" + users.findAll().getFirst().getId())))
+        .andExpect(jsonPath("$.code").value(12009));
+    mvc.perform(browser.read(get("/api/admin/users")))
+        .andExpect(jsonPath("$.code").value(12009));
+    mvc.perform(browser.mutate(post("/api/auth/change-password"))
+        .contentType("application/json")
+        .content("{\"currentPassword\":\"secret-password\",\"newPassword\":\"new-password\"}"))
+        .andExpect(jsonPath("$.code").value(200));
+    mvc.perform(browser.read(get("/api/auth/me")))
+        .andExpect(jsonPath("$.data.mustChangePassword").value(false));
+    mvc.perform(browser.read(get("/api/admin/users")))
+        .andExpect(jsonPath("$.code").value(200));
+  }
+
+  @Test
+  @DisplayName("管理员分页搜索包含邀请注册账号且响应不包含口令或业务内容")
+  void adminListsPersistedAccountsSafely() throws Exception {
+    var admin = createUser("admin-list", UserRole.ADMIN);
+    var issued = inviteCodes.issue(Duration.ofHours(1), admin.getId());
+    inviteCodes.register(issued.rawCode(), "invited", "chosen-password", "Invited Person");
+    var browser = login("admin-list");
+    var result = mvc.perform(browser.read(get("/api/admin/users")
+        .param("search", "invited").param("page", "0").param("size", "10")))
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.content[0].username").value("invited"))
+        .andReturn();
+    assertThat(result.getResponse().getContentAsString())
+        .doesNotContain("chosen-password", "passwordHash", "resumeText");
+  }
+
+  @Test
+  @DisplayName("管理员可列出和撤销签发的邀请码，列表不泄露明文与哈希")
+  void adminListsAndRevokesInvitesSafely() throws Exception {
+    var admin = createUser("admin-invite", UserRole.ADMIN);
+    var issued = inviteCodes.issue(Duration.ofHours(1), admin.getId());
+    var browser = login("admin-invite");
+    var result = mvc.perform(browser.read(get("/api/admin/invites")))
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.content[0].id").value(issued.id().toString()))
+        .andReturn();
+    assertThat(result.getResponse().getContentAsString())
+        .doesNotContain(issued.rawCode(), "inviteHash");
+    mvc.perform(browser.mutate(post("/api/admin/invites/" + issued.id() + "/revoke")))
+        .andExpect(jsonPath("$.code").value(200));
+    mvc.perform(browser.read(get("/api/admin/invites")))
+        .andExpect(jsonPath("$.data.content[0].status").value("REVOKED"));
   }
 
   @RestController

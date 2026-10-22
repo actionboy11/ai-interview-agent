@@ -92,6 +92,7 @@ public enum ErrorCode {
     AUTH_ADMIN_REQUIRED(12006, "需要启用的管理员账号"),
     AUTH_INVALID_INPUT(12007, "账号参数无效"),
     AUTH_BOOTSTRAP_INVALID(12008, "初始管理员配置无效"),
+    AUTH_PASSWORD_CHANGE_REQUIRED(12009, "请先修改临时密码"),
 
     ABILITY_PROPOSAL_NOT_FOUND(13001, "能力候选不存在"),
     ABILITY_PROFILE_NOT_FOUND(13002, "能力画像不存在"),

@@ -1,6 +1,7 @@
 package interview.guide.modules.auth.security;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,7 +23,12 @@ final class ActiveUserFilter extends OncePerRequestFilter {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication != null && authentication.getPrincipal() instanceof CurrentUser) {
       try {
-        currentUsers.requireCurrentUser();
+        var current = currentUsers.requireCurrentUser();
+        if (current.mustChangePassword() && !isPasswordChangeRoute(request)) {
+          responses.write(response, ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED.getCode(),
+              "请先修改临时密码");
+          return;
+        }
       } catch (BusinessException exception) {
         SecurityContextHolder.clearContext();
         var session = request.getSession(false);
@@ -34,5 +40,14 @@ final class ActiveUserFilter extends OncePerRequestFilter {
       }
     }
     chain.doFilter(request, response);
+  }
+
+  private boolean isPasswordChangeRoute(HttpServletRequest request) {
+    String path = request.getRequestURI().substring(request.getContextPath().length());
+    return ("GET".equals(request.getMethod())
+        && ("/api/auth/me".equals(path) || "/api/auth/csrf".equals(path)))
+        || ("POST".equals(request.getMethod())
+            && ("/api/auth/change-password".equals(path)
+                || "/api/auth/logout".equals(path)));
   }
 }

@@ -137,6 +137,38 @@ class AsyncOwnerPersistenceTest {
   }
 
   @Test
+  @DisplayName("WebSocket 握手以持久化临时改密标记拒绝连接，改密后旧会话可重新握手")
+  void temporaryPasswordBlocksVoiceHandshake() {
+    var owner = user(UserStatus.ACTIVE);
+    owner.setMustChangePassword(true);
+    users.saveAndFlush(owner);
+    var interviews = mock(VoiceInterviewService.class);
+    var handshake = new VoiceInterviewHandshakeInterceptor(new AuthUserQueryService(users,
+        Mappers.getMapper(AuthResponseMapper.class)), interviews);
+    var request = new MockHttpServletRequest("GET", "/ws/voice-interview/42");
+    var session = new MockHttpSession();
+    var context = new SecurityContextImpl();
+    context.setAuthentication(new UsernamePasswordAuthenticationToken(
+        new CurrentUser(owner.getId(), owner.getUsername(), owner.getDisplayName(),
+            UserRole.USER, false), "", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+    session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
+        context);
+    request.setSession(session);
+    var response = mock(ServerHttpResponse.class);
+    assertThat(handshake.beforeHandshake(new ServletServerHttpRequest(request), response,
+        mock(org.springframework.web.socket.WebSocketHandler.class), new HashMap<>())).isFalse();
+    verify(response).setStatusCode(HttpStatus.FORBIDDEN);
+    verify(interviews, never()).requireSessionOwner(org.mockito.ArgumentMatchers.anyLong(),
+        org.mockito.ArgumentMatchers.any());
+    owner = users.findById(owner.getId()).orElseThrow();
+    owner.setMustChangePassword(false);
+    users.saveAndFlush(owner);
+    assertThat(handshake.beforeHandshake(new ServletServerHttpRequest(request),
+        mock(ServerHttpResponse.class), mock(org.springframework.web.socket.WebSocketHandler.class),
+        new HashMap<>())).isTrue();
+  }
+
+  @Test
   @DisplayName("真实身份和仓储限定知识库与日程 CRUD，ADMIN 也不能读改他人内容")
   void tenantKnowledgeAndScheduleCrud() {
     UserEntity owner = user(UserStatus.ACTIVE);

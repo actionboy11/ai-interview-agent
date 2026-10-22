@@ -59,7 +59,12 @@ public class VoiceInterviewHandshakeInterceptor implements HandshakeInterceptor 
       return false;
     }
     try {
-      UUID ownerId = users.requireActive(principal.id()).id();
+      var current = users.requireActive(principal.id());
+      if (current.mustChangePassword()) {
+        response.setStatusCode(HttpStatus.FORBIDDEN);
+        return false;
+      }
+      UUID ownerId = current.id();
       interviews.requireSessionOwner(sessionId, ownerId);
       attributes.put(OWNER_ID_ATTRIBUTE, ownerId);
       attributes.put(SESSION_ID_ATTRIBUTE, sessionId);

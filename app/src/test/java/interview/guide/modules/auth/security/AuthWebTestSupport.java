@@ -113,7 +113,9 @@ public abstract class AuthWebTestSupport {
   }
 
   protected UserEntity createUser(String name, UserRole role) {
-    return accounts.createUser(new CreateAdminUserCommand(name, "secret-password", name, role));
+    var user = accounts.createUser(new CreateAdminUserCommand(name, "secret-password", name, role));
+    user.setMustChangePassword(false);
+    return users.saveAndFlush(user);
   }
 
   protected Browser login(String name) throws Exception {

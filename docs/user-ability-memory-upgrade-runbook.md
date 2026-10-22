@@ -145,8 +145,9 @@ PY
 
 bootstrap 创建的账号通常 `mustChangePassword=true`，所以示例实际调用
 `POST /api/auth/change-password`（`currentPassword`、`newPassword`），再 GET `/api/auth/me`
-确认标记清除；已改过密码且标记为 false 时跳过。当前后端不以此标记阻挡 admin API，
-前端会要求改密。新目标账号的临时密码标记不妨碍 V3 归属；用户后续登录前端仍需改密。
+确认标记清除；已改过密码且标记为 false 时跳过。后端会在持久化标记为 true 时阻挡
+admin 和业务 API，只允许读取 `/api/auth/me`、获取 CSRF、改密和登出；前端也要求改密。
+新目标账号的临时密码标记不妨碍 V3 归属；用户后续登录仍需改密。
 V3 只要求匹配的现有用户，`USER` 足够；不要仅为旧数据归属授予 `ADMIN`。
 
 在 `.env.production` 中按 Compose 单引号规则填写已核对的 `APP_LEGACY_OWNER_USERNAME`，
