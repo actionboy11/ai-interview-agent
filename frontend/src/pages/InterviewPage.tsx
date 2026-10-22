@@ -4,7 +4,8 @@ import {interviewApi} from '../api/interview';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InterviewChatPanel from '../components/InterviewChatPanel';
 import InterviewPageHeader from '../components/InterviewPageHeader';
-import type {InterviewQuestion, InterviewSession} from '../types/interview';
+import QuestionPlanExplanation from '../components/QuestionPlanExplanation';
+import type {InterviewQuestion, InterviewSession, QuestionPlanSummary} from '../types/interview';
 import type {Difficulty} from '../components/UnifiedInterviewModal';
 import type {CategoryDTO} from '../api/skill';
 import { CUSTOM_SKILL_ID } from '../hooks/useInterviewConfig';
@@ -41,6 +42,10 @@ export default function Interview({
   onInterviewComplete,
 }: InterviewProps) {
   const [session, setSession] = useState<InterviewSession | null>(null);
+  const [plan, setPlan] = useState<QuestionPlanSummary | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const planRequestRef = useRef(0);
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [answer, setAnswer] = useState('');
@@ -56,6 +61,8 @@ export default function Interview({
   const difficulty = initialConfig?.difficulty ?? 'mid';
   const customCategories = initialConfig?.customCategories;
   const jdText = initialConfig?.jdText;
+
+  useEffect(() => () => { planRequestRef.current += 1; }, []);
 
   // 自动开始面试（恢复已有会话 或 创建新会话）
   useEffect(() => {
@@ -119,6 +126,7 @@ export default function Interview({
 
   const initSession = (s: InterviewSession) => {
     setSession(s);
+    void loadPlan(s.sessionId);
 
     if (s.questions.length > 0) {
       const idx = Math.min(s.currentQuestionIndex, s.questions.length - 1);
@@ -143,6 +151,21 @@ export default function Interview({
         }
       }
       setMessages(restoredMessages);
+    }
+  };
+
+  const loadPlan = async (sessionId: string) => {
+    const requestId = ++planRequestRef.current;
+    setPlan(null);
+    setPlanError(null);
+    setPlanLoading(true);
+    try {
+      const result = await interviewApi.getPlan(sessionId);
+      if (requestId === planRequestRef.current) setPlan(result);
+    } catch {
+      if (requestId === planRequestRef.current) setPlanError('加载出题说明失败。');
+    } finally {
+      if (requestId === planRequestRef.current) setPlanLoading(false);
     }
   };
 
@@ -254,6 +277,11 @@ export default function Interview({
           </svg>
         )}
       />
+
+      <div className="mb-5">
+        <QuestionPlanExplanation plan={plan} loading={planLoading} error={planError}
+          onRetry={() => void loadPlan(session.sessionId)} questionIndex={currentQuestion.questionIndex} />
+      </div>
 
       <motion.div
         initial={{ opacity: 0 }}

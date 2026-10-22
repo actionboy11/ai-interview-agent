@@ -10,6 +10,8 @@ import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.SessionListItemDTO;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.model.SubmitAnswerResponse;
+import interview.guide.modules.interview.planning.dto.QuestionPlanSummaryResponse;
+import interview.guide.modules.interview.planning.service.QuestionPlanSummaryService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewSessionService;
@@ -46,6 +48,7 @@ public class InterviewController {
     private final InterviewSessionService sessionService;
     private final InterviewHistoryService historyService;
     private final InterviewPersistenceService persistenceService;
+    private final QuestionPlanSummaryService planSummaries;
     
     /**
      * 列出所有面试会话（用于面试记录页）
@@ -77,6 +80,12 @@ public class InterviewController {
     public Result<InterviewSessionDTO> getSession(@PathVariable String sessionId) {
         InterviewSessionDTO session = sessionService.getSession(sessionId);
         return Result.success(session);
+    }
+
+    /** Return only the saved allocation purposes and generic human-readable reasons. */
+    @GetMapping("/api/interview/sessions/{sessionId}/plan")
+    public Result<QuestionPlanSummaryResponse> getPlan(@PathVariable String sessionId) {
+        return Result.success(planSummaries.summary(sessionId));
     }
     
     /**

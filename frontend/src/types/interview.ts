@@ -13,12 +13,29 @@ export interface InterviewSession {
 
 export interface InterviewQuestion {
   questionIndex: number;
+  slotId?: string | null;
   question: string;
   type: string;
   category: string;
   userAnswer: string | null;
   score: number | null;
   feedback: string | null;
+}
+
+export type QuestionPurpose = 'MANDATORY' | 'BASELINE' | 'WEAKNESS_REINFORCEMENT'
+  | 'STRENGTH_CALIBRATION' | 'EXPLORATION';
+
+export interface QuestionPlanSummary {
+  available: boolean;
+  mode: 'ADAPTIVE' | 'FIXED' | null;
+  purposeCounts: Record<QuestionPurpose, number>;
+  questions: Array<{
+    questionIndex: number;
+    slotId: string;
+    categoryKey: string;
+    purpose: QuestionPurpose;
+    reason: string;
+  }>;
 }
 
 export interface CreateInterviewRequest {

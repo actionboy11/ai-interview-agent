@@ -7,6 +7,9 @@ import type {AbilityProposal} from '../types/memory';
 import {RefreshCw} from 'lucide-react';
 import AbilityProposalCard from './AbilityProposalCard';
 import {LatestCollection} from '../utils/latestCollection';
+import QuestionPlanExplanation from './QuestionPlanExplanation';
+import {interviewApi} from '../api/interview';
+import type {QuestionPlanSummary} from '../types/interview';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -16,6 +19,28 @@ interface InterviewDetailPanelProps {
  * 面试详情面板组件
  */
 export default function InterviewDetailPanel({ interview }: InterviewDetailPanelProps) {
+  const [plan, setPlan] = useState<QuestionPlanSummary | null>(null);
+  const [planSessionId, setPlanSessionId] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planRetry, setPlanRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setPlan(null);
+    setPlanSessionId(interview.sessionId);
+    setPlanError(null);
+    setPlanLoading(true);
+    interviewApi.getPlan(interview.sessionId).then(value => {
+      if (active) {
+        setPlan(value);
+      }
+    }).catch(() => {
+      if (active) setPlanError('加载出题说明失败。');
+    }).finally(() => {
+      if (active) setPlanLoading(false);
+    });
+    return () => { active = false; };
+  }, [interview.sessionId, planRetry]);
   // 默认展开所有题目
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(() => {
     const allIndices = new Set<number>();
@@ -61,6 +86,11 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
       />
 
       <AbilityProposalsSection sessionId={interview.sessionId} evaluationStatus={interview.evaluateStatus} evaluationError={interview.evaluateError} />
+
+      <QuestionPlanExplanation plan={planSessionId === interview.sessionId ? plan : null}
+        loading={planSessionId !== interview.sessionId || planLoading}
+        error={planSessionId === interview.sessionId ? planError : null}
+        onRetry={() => setPlanRetry(value => value + 1)} />
 
       {/* 表现优势 */}
       {interview.strengths && interview.strengths.length > 0 && (

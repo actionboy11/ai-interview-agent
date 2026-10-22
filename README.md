@@ -272,9 +272,9 @@ Copy-Item .env.example .env
 AI_BAILIAN_API_KEY=your_dashscope_api_key
 APP_AI_CONFIG_ENCRYPTION_KEY=replace_with_a_random_long_secret
 
-POSTGRES_PASSWORD=123456
-APP_STORAGE_ACCESS_KEY=rustfsadmin
-APP_STORAGE_SECRET_KEY=rustfsadmin
+POSTGRES_PASSWORD=<generate-a-unique-database-password>
+APP_STORAGE_ACCESS_KEY=<your-storage-access-key>
+APP_STORAGE_SECRET_KEY=<generate-a-unique-storage-secret>
 ```
 
 `.env` 已被 Git 忽略。Gradle `bootRun` 会从仓库根目录加载该文件，不要将真实 API Key 写入 `application.yml` 或提交到版本库。
@@ -286,14 +286,14 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml ps
 ```
 
-| 服务 | 地址 | 默认账号 |
-| --- | --- | --- |
-| PostgreSQL | `localhost:5432` | `postgres / 123456` |
-| Redis | `localhost:6379` | 无 |
-| RabbitMQ | `localhost:5672` | `interview / interview` |
-| RabbitMQ 管理台 | http://localhost:15672 | `interview / interview` |
-| RustFS API | `localhost:9000` | `rustfsadmin / rustfsadmin` |
-| RustFS 控制台 | http://localhost:9001 | `rustfsadmin / rustfsadmin` |
+| 服务 | 地址 |
+| --- | --- |
+| PostgreSQL | `localhost:5432` |
+| Redis | `localhost:6379` |
+| RabbitMQ | `localhost:5672` |
+| RabbitMQ 管理台 | http://localhost:15672 |
+| RustFS API | `localhost:9000` |
+| RustFS 控制台 | http://localhost:9001 |
 
 RustFS 首次启动后创建名为 `interview-guide` 的 Bucket；应用也配置了自动创建能力。
 
@@ -372,6 +372,18 @@ APP_KNOWLEDGE_VECTORIZATION_MESSAGING_PROVIDER=rabbitmq
 ```
 
 将单个值改为 `redis-stream` 并重启后端，可对该模块独立回滚。
+
+## 多用户与能力记忆运维
+
+首次部署时，在私有 `.env` 中同时设置 `APP_AUTH_BOOTSTRAP_USERNAME`、`APP_AUTH_BOOTSTRAP_PASSWORD` 和 `APP_AUTH_BOOTSTRAP_DISPLAY_NAME`。三项必须完整；系统不会提供默认管理员密码，也不会用环境变量重置已存在的管理员。管理员登录后在管理页面生成有期限、一次性的邀请码（`POST /api/admin/invites`），用户在邀请注册页使用邀请码创建账号（`POST /api/auth/register-by-invite`）。管理员只能管理账号，不能直接读取用户的面试和能力记忆。
+
+浏览器使用服务器 Session Cookie。前端先调用 `GET /api/auth/csrf` 获取 `XSRF-TOKEN`，变更请求携带 `X-XSRF-TOKEN`；登录会轮换会话和 CSRF 状态，登录后要重新获取令牌。跨域部署必须配置实际前端来源，且请求携带凭证。API 的认证、权限和业务错误仍用 HTTP 200 的 `Result.error` 结构表达；前端按 `code` 处理失效会话与拒绝访问。
+
+已有单用户数据升级要分两阶段并暂停写入。先对 PostgreSQL 做完整备份，例如 `pg_dump -Fc -f <safe-backup-path> <database-name>`，同时备份对象存储与应用所需密钥，记录当前应用版本和 `flyway_schema_history`。第一阶段部署支持账号/邀请的版本并只运行到 V2，创建要承接旧数据的账号；第二阶段在私有环境变量中把 `APP_LEGACY_OWNER_USERNAME` 设为该账号的用户名，部署当前版本执行 V3 至 V10。V3 会在事务中锁定旧资源表，要求旧数据恰好对应这个账号，然后回填所有权并建立约束；全新空库可留空。不要在已有旧数据的库上跳过第一阶段、猜测用户名或修改已执行的迁移。生产库使用 `ddl-auto=validate`，迁移失败时停止服务、保留错误日志，修正账号/配置后再执行；需要回退时先停止应用与消费者，在隔离数据库运行 `pg_restore --clean --if-exists -d <isolated-restore-database> <safe-backup-path>` 验证备份，再把升级前数据库及对象存储备份恢复到服务使用的目标，并回到升级前应用版本。仅回滚二进制不能撤销 V3–V10 的 schema 改动。
+
+文字面试评估完成后，能力证据派生使用独立 RabbitMQ 路由 `ability.memory.derivation.queue`，失败依次按配置的 10、30、60 秒重试，最终进入 `ability.memory.derivation.dead.queue`，会话上保存派生失败状态和错误。排查时先检查评估是否完成、队列/死信与消费者日志、会话派生状态；修复根因后可重投原任务，派生按会话幂等。当前没有供用户自行重放死信的管理 API，不能把“刷新建议”当作重试任务。评估失败或派生尚未完成时不会出现能力候选。
+
+用户在面试详情确认、修改或拒绝候选画像。只有已确认且仍为 ACTIVE 的画像影响下一场文字面试；未确认候选和其他用户的数据不参与规划。出题时的槽位计划会随会话保存，`GET /api/interview/sessions/{sessionId}/plan` 只返回用途计数与逐题通用原因，不返回画像摘要、内部 Prompt 或模型输入。旧会话没有计划快照时返回“暂无说明”。没有已确认画像，或能力记忆读取/规划失败时，系统使用固定题量分配；若模型生成的自适应题目不符合槽位计划，也会保存固定回退计划并重新生成。供应商本身不可用时创建面试失败，不会伪装成能力记忆回退。
 
 ## 已知限制与 Roadmap
 

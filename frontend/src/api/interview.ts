@@ -4,6 +4,7 @@ import type {
   CurrentQuestionResponse,
   InterviewReport,
   InterviewSession,
+  QuestionPlanSummary,
   SubmitAnswerRequest,
   SubmitAnswerResponse
 } from '../types/interview';
@@ -44,6 +45,10 @@ export const interviewApi = {
    */
   async getSession(sessionId: string): Promise<InterviewSession> {
     return request.get<InterviewSession>(`/api/interview/sessions/${sessionId}`);
+  },
+
+  async getPlan(sessionId: string): Promise<QuestionPlanSummary> {
+    return request.get<QuestionPlanSummary>(`/api/interview/sessions/${sessionId}/plan`);
   },
 
   /**
