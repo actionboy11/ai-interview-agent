@@ -4,6 +4,7 @@ import interview.guide.common.async.AbstractStreamConsumer;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
@@ -116,7 +117,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     protected boolean shouldSkip(EvaluatePayload payload) {
         return sessionRepository.findBySessionIdWithResume(payload.sessionId())
             .map(session -> {
-                if (!hasConsistentOwner(session)) {
+                if (!hasConsistentOwner(session)
+                    || session.getOwner().getStatus() != UserStatus.ACTIVE) {
                     return true;
                 }
                 if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
@@ -144,7 +146,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         }
 
         InterviewSessionEntity session = sessionOpt.get();
-        if (!hasConsistentOwner(session)) {
+        if (!hasConsistentOwner(session)
+            || session.getOwner().getStatus() != UserStatus.ACTIVE) {
             log.warn("Discarding inconsistent ownership graph: sessionId={}", sessionId);
             return;
         }
@@ -223,12 +226,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
      */
     private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
         try {
-            sessionRepository.findBySessionIdWithResume(sessionId).filter(this::hasConsistentOwner).ifPresent(session -> {
-                session.setEvaluateStatus(status);
-                session.setEvaluateError(error);
-                sessionRepository.save(session);
-                log.debug("评估状态已更新: sessionId={}, status={}", sessionId, status);
-            });
+            persistenceService.updateEvaluateStatusInternal(sessionId, status, error);
+            log.debug("评估状态已更新: sessionId={}, status={}", sessionId, status);
         } catch (Exception e) {
             log.error("更新评估状态失败: sessionId={}, status={}, error={}", sessionId, status, e.getMessage(), e);
         }

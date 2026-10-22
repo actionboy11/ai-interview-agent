@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -133,15 +134,27 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
-        setEvaluateStatus(requireOwnedSession(sessionId), status, error);
+        var ownerId = currentUser.requireUserId();
+        var session = sessionRepository.findBySessionIdForDerivation(sessionId)
+            .filter(value -> value.getOwner().getId().equals(ownerId))
+            .map(this::validateOwnership)
+            .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+        setEvaluateStatus(session, status, error);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void updateEvaluateStatusInternal(String sessionId, AsyncTaskStatus status, String error) {
-        findBySessionIdInternal(sessionId).ifPresent(session -> setEvaluateStatus(session, status, error));
+        sessionRepository.findBySessionIdForDerivation(sessionId)
+            .filter(session -> session.getQuestionsJson() != null)
+            .map(this::validateOwnership)
+            .ifPresent(session -> setEvaluateStatus(session, status, error));
     }
 
     private void setEvaluateStatus(InterviewSessionEntity value, AsyncTaskStatus status, String error) {
+        if (value.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+            && value.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            return;
+        }
         Optional<InterviewSessionEntity> sessionOpt = Optional.of(value);
         if (sessionOpt.isPresent()) {
             InterviewSessionEntity session = sessionOpt.get();
@@ -212,12 +225,16 @@ public class InterviewPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void saveReport(String sessionId, InterviewReportDTO report) {
-        persistReport(requireOwnedSession(sessionId), report);
+        requireOwnedSession(sessionId);
+        if (saveReport(sessionId, report, UUID.randomUUID().toString())
+            == CompletionResult.SESSION_MISSING) {
+            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void saveReportInternal(String sessionId, InterviewReportDTO report) {
-        findBySessionIdInternal(sessionId).ifPresent(session -> persistReport(session, report));
+        saveReport(sessionId, report, UUID.randomUUID().toString());
     }
 
     private void persistReport(InterviewSessionEntity session, InterviewReportDTO report) {
@@ -307,8 +324,10 @@ public class InterviewPersistenceService {
         InterviewReportDTO report,
         String messageId
     ) {
-        Optional<InterviewSessionEntity> sessionOpt =
-            findBySessionIdInternal(sessionId);
+        Optional<InterviewSessionEntity> sessionOpt = sessionRepository
+            .findBySessionIdForDerivation(sessionId)
+            .filter(session -> session.getQuestionsJson() != null)
+            .map(this::validateOwnership);
         if (sessionOpt.isEmpty()) {
             return CompletionResult.SESSION_MISSING;
         }

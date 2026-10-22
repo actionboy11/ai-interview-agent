@@ -19,6 +19,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
+import interview.guide.modules.interview.planning.ResumeFactGrounding;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
 import interview.guide.modules.interview.planning.model.QuestionPlan;
@@ -97,14 +98,7 @@ public class InterviewSessionService {
             persistenceService.getHistoricalQuestions(skillId, request.resumeId());
         SkillDTO skill = questionService.resolveSkillForPlanning(skillId,
             request.customCategories(), request.jdText());
-        Set<String> grounded = Set.of();
-        if (resumeText != null) {
-                String text = resumeText.toLowerCase(java.util.Locale.ROOT);
-                grounded = skill.categories().stream()
-                    .filter(category -> category.label() != null && category.label().length() >= 3
-                        && text.contains(category.label().toLowerCase(java.util.Locale.ROOT)))
-                    .map(category -> category.key()).collect(Collectors.toSet());
-        }
+        Set<String> grounded = new ResumeFactGrounding().grounded(resumeText, skill.categories());
         Map<String, Integer> recentCoverage = historicalQuestions.stream()
             .filter(question -> question.type() != null)
             .collect(Collectors.toMap(HistoricalQuestion::type, question -> 1, Integer::sum));

@@ -2,6 +2,8 @@ package interview.guide.modules.resume.repository;
 
 import interview.guide.modules.resume.model.ResumeEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -13,6 +15,9 @@ import java.util.List;
  */
 @Repository
 public interface ResumeRepository extends JpaRepository<ResumeEntity, Long> {
+
+  @Query("select r from ResumeEntity r join fetch r.owner where r.id = :id")
+  Optional<ResumeEntity> findByIdForWorker(@Param("id") Long id);
 
   Optional<ResumeEntity> findByOwnerIdAndId(UUID ownerId, Long id);
 

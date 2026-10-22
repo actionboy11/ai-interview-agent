@@ -2,6 +2,7 @@ package interview.guide.modules.resume.messaging.rabbit;
 
 import com.rabbitmq.client.Channel;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.service.ResumeGradingService;
@@ -52,6 +53,7 @@ public class ResumeAnalysisRabbitConsumer {
 
         ResumeEntity resume = persistenceService.findByIdInternal(task.resumeId()).orElse(null);
         if (resume == null
+            || resume.getOwner() == null || resume.getOwner().getStatus() != UserStatus.ACTIVE
             || resume.getAnalyzeStatus() == AsyncTaskStatus.COMPLETED
             || persistenceService.isAnalysisMessageCompleted(task.messageId().toString())) {
             channel.basicAck(deliveryTag, false);

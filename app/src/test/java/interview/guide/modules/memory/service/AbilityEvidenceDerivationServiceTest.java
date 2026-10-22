@@ -8,7 +8,23 @@ import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.auth.model.UserRole;
 import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
+import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.InterviewQuestionDTO;
+import interview.guide.modules.interview.planning.model.InterviewQuestionPlanEntity;
+import interview.guide.modules.interview.planning.model.PlanningMode;
+import interview.guide.modules.interview.planning.model.QuestionPlan;
+import interview.guide.modules.interview.planning.model.QuestionPurpose;
+import interview.guide.modules.interview.planning.model.QuestionSlot;
+import interview.guide.modules.interview.planning.model.QuestionSourceMode;
+import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
+import interview.guide.modules.interview.repository.InterviewAnswerRepository;
+import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.auth.repository.UserRepository;
+import interview.guide.modules.auth.security.CurrentUserProvider;
+import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
+import interview.guide.modules.resume.repository.ResumeRepository;
 import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.repository.AbilityProfileProposalRepository;
 import interview.guide.modules.memory.repository.UserAbilityEvidenceRepository;
@@ -18,6 +34,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +49,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.support.TransactionTemplate;
+import static org.mockito.Mockito.mock;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(classes = AbilityEvidenceDerivationServiceTest.TestApplication.class, properties = {
@@ -54,6 +72,14 @@ class AbilityEvidenceDerivationServiceTest {
     ObjectMapper objectMapper() {
       return new ObjectMapper();
     }
+
+    @Bean
+    InterviewPersistenceService interviewPersistence(InterviewSessionRepository sessions,
+        InterviewAnswerRepository answers, ResumeRepository resumes, ObjectMapper mapper,
+        UserRepository users) {
+      return new InterviewPersistenceService(sessions, answers, resumes, mapper,
+          mock(CurrentUserProvider.class), users, mock(AbilityMemoryDeletionService.class));
+    }
   }
 
   @Autowired EntityManager entityManager;
@@ -61,6 +87,10 @@ class AbilityEvidenceDerivationServiceTest {
   @Autowired AbilityEvidenceDerivationService service;
   @Autowired AbilityProfileProposalRepository proposals;
   @Autowired UserAbilityEvidenceRepository evidence;
+  @Autowired InterviewPersistenceService reports;
+  @Autowired InterviewSessionRepository sessionRepository;
+  @Autowired InterviewQuestionPlanRepository planRepository;
+  @Autowired ObjectMapper mapper;
 
   @Test
   @DisplayName("只从已评估且已回答的稳定分类生成同场候选与关联证据，重投递不重复")
@@ -88,7 +118,46 @@ class AbilityEvidenceDerivationServiceTest {
         .hasSize(2).allSatisfy(item -> {
           assertThat(item.getProposal().getId()).isEqualTo(items.getFirst().getId());
           assertThat(item.getCategoryKey()).isEqualTo("JAVA");
+          assertThat(item.getDifficulty()).isEqualTo("mid");
         });
+  }
+
+  @Test
+  @DisplayName("证据难度取回答所属的有效计划槽位，缺槽位时退回会话难度")
+  void usesEffectivePlanSlotDifficulty() {
+    String sessionId = UUID.randomUUID().toString();
+    UUID ownerId = transactions.execute(status -> {
+      var owner = owner(UserStatus.ACTIVE);
+      var session = session(owner, sessionId, true);
+      session.setQuestionsJson(mapper.writeValueAsString(List.of(
+          InterviewQuestionDTO.planned(0, "弱项", "JAVA", "Java", null, false, null, "weak"),
+          InterviewQuestionDTO.planned(1, "强项", "JAVA", "Java", null, false, null, "strong"),
+          InterviewQuestionDTO.create(2, "旧题", "JAVA", "Java"))));
+      var plan = new QuestionPlan(1, PlanningMode.ADAPTIVE, List.of(
+          new QuestionSlot("weak", "JAVA", QuestionPurpose.WEAKNESS_REINFORCEMENT,
+              "junior", QuestionSourceMode.DIRECTION, List.of(), List.of(), null),
+          new QuestionSlot("strong", "JAVA", QuestionPurpose.STRENGTH_CALIBRATION,
+              "senior", QuestionSourceMode.DIRECTION, List.of(), List.of(), null)), null);
+      var saved = new InterviewQuestionPlanEntity();
+      saved.setOwner(owner);
+      saved.setSession(session);
+      saved.setPlanVersion(1);
+      saved.setPlanningMode(PlanningMode.ADAPTIVE);
+      saved.setPlanJson(mapper.writeValueAsString(plan));
+      planRepository.saveAndFlush(saved);
+      answer(session, 0, "JAVA", "Java", "回答", 60);
+      answer(session, 1, "JAVA", "Java", "回答", 90);
+      answer(session, 2, "JAVA", "Java", "回答", 70);
+      return owner.getId();
+    });
+
+    assertThat(service.derive(sessionId, UUID.randomUUID())).isEqualTo(DerivationResult.CREATED);
+    var difficulties = transactions.execute(status -> evidence
+        .findByOwnerIdAndInterviewSessionId(ownerId, sessionIdToId(sessionId)).stream()
+        .map(item -> item.getInterviewAnswer().getQuestionIndex() + ":" + item.getDifficulty())
+        .toList());
+    assertThat(difficulties).containsExactlyInAnyOrder(
+            "0:junior", "1:senior", "2:mid");
   }
 
   @Test
@@ -141,6 +210,75 @@ class AbilityEvidenceDerivationServiceTest {
         .hasSize(1);
     assertThat(evidence.findByOwnerIdAndInterviewSessionId(ownerId, sessionIdToId(sessionId)))
         .hasSize(1);
+  }
+
+  @Test
+  @DisplayName("并发不同报告只有一个完成，派生证据与最终报告一致")
+  void distinctConcurrentReportsHaveOneWinner() throws Exception {
+    String sessionId = UUID.randomUUID().toString();
+    UUID ownerId = transactions.execute(status -> {
+      var owner = owner(UserStatus.ACTIVE);
+      answer(session(owner, sessionId, false), 0, "JAVA", "Java", "回答", 0);
+      return owner.getId();
+    });
+    CountDownLatch start = new CountDownLatch(1);
+    AtomicReference<Throwable> failure = new AtomicReference<>();
+    AtomicInteger created = new AtomicInteger();
+    Runnable first = () -> completeConcurrently(sessionId, 40, "first", start, created, failure);
+    Runnable second = () -> completeConcurrently(sessionId, 90, "second", start, created, failure);
+    Thread a = Thread.ofVirtual().start(first);
+    Thread b = Thread.ofVirtual().start(second);
+    start.countDown();
+    a.join();
+    b.join();
+    assertThat(failure.get()).isNull();
+    assertThat(created.get()).isOne();
+    var winner = sessionRepository.findBySessionId(sessionId).orElseThrow();
+    assertThat(winner.getOverallScore()).isIn(40, 90);
+    assertThat(service.derive(sessionId, UUID.randomUUID())).isEqualTo(DerivationResult.CREATED);
+    assertThat(evidence.findByOwnerIdAndInterviewSessionId(ownerId, winner.getId()))
+        .singleElement().satisfies(item ->
+            assertThat(item.getQuestionScore()).isEqualTo(winner.getOverallScore()));
+  }
+
+  @Test
+  @DisplayName("派生完成后迟到的不同报告不能改写报告、证据或派生状态")
+  void lateReportCannotOverwriteDerivedEvidence() {
+    String sessionId = UUID.randomUUID().toString();
+    UUID ownerId = transactions.execute(status -> {
+      var owner = owner(UserStatus.ACTIVE);
+      answer(session(owner, sessionId, false), 0, "JAVA", "Java", "回答", 0);
+      return owner.getId();
+    });
+    assertThat(reports.saveReport(sessionId, report(sessionId, 40), "first"))
+        .isEqualTo(InterviewPersistenceService.CompletionResult.CREATED);
+    assertThat(service.derive(sessionId, UUID.randomUUID())).isEqualTo(DerivationResult.CREATED);
+    assertThat(reports.saveReport(sessionId, report(sessionId, 90), "second"))
+        .isEqualTo(InterviewPersistenceService.CompletionResult.ALREADY_COMPLETED);
+    var winner = sessionRepository.findBySessionId(sessionId).orElseThrow();
+    assertThat(winner.getOverallScore()).isEqualTo(40);
+    assertThat(winner.getMemoryDerivationStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+    assertThat(evidence.findByOwnerIdAndInterviewSessionId(ownerId, winner.getId()))
+        .singleElement().satisfies(item -> assertThat(item.getQuestionScore()).isEqualTo(40));
+  }
+
+  private void completeConcurrently(String sessionId, int score, String messageId,
+      CountDownLatch start, AtomicInteger created, AtomicReference<Throwable> failure) {
+    try {
+      start.await();
+      if (reports.saveReport(sessionId, report(sessionId, score), messageId)
+          == InterviewPersistenceService.CompletionResult.CREATED) {
+        created.incrementAndGet();
+      }
+    } catch (Throwable problem) {
+      failure.compareAndSet(null, problem);
+    }
+  }
+
+  private InterviewReportDTO report(String sessionId, int score) {
+    return new InterviewReportDTO(sessionId, 1, score, List.of(), List.of(
+        new InterviewReportDTO.QuestionEvaluation(0, "问题 0", "JAVA", "Java", "回答",
+            score, "反馈")), "反馈", List.of(), List.of(), List.of());
   }
 
   @Test

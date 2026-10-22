@@ -3,6 +3,7 @@ package interview.guide.modules.interview.messaging.rabbit;
 import com.rabbitmq.client.Channel;
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
@@ -82,7 +83,8 @@ public class InterviewEvaluationRabbitConsumer {
     }
 
     InterviewSessionEntity session = sessionOpt.get();
-    if (session.getOwner() == null || (session.getResume() != null
+    if (session.getOwner() == null || session.getOwner().getStatus() != UserStatus.ACTIVE
+        || (session.getResume() != null
         && !session.getOwner().getId().equals(session.getResume().getOwner().getId()))) {
       log.warn("Discarding inconsistent ownership graph: sessionId={}", task.sessionId());
       channel.basicAck(deliveryTag, false);

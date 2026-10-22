@@ -16,6 +16,7 @@ import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
@@ -84,10 +85,26 @@ class InterviewEvaluationRabbitConsumerTest {
   }
 
   @Test
+  @DisplayName("被禁用账号的排队评估直接确认且不调用模型")
+  void disabledOwnerIsAcknowledgedWithoutModelCall() throws Exception {
+    InterviewSessionEntity session = new InterviewSessionEntity();
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.DISABLED).build());
+    session.setSessionId("session-42");
+    session.setQuestionsJson("[]");
+    when(sessionRepository.findBySessionIdWithResume("session-42"))
+        .thenReturn(Optional.of(session));
+
+    consumer.consume(message("session-42", 0), envelope(7L), channel);
+
+    verify(channel).basicAck(7L, false);
+    org.mockito.Mockito.verifyNoInteractions(evaluationService);
+  }
+
+  @Test
   @DisplayName("评估已完成时直接确认重复消息")
   void shouldAckCompletedSession() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
     session.setMemoryDerivationStatus(AsyncTaskStatus.COMPLETED);
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -103,7 +120,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("已完成评估重投递时补发派生任务且不再次调用模型")
   void republishesCompletedEvaluationWithoutModelCall() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setSessionId("session-42");
     session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -120,7 +137,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("派生消息发布失败时重入队且评估保持完成")
   void requeuesWhenDerivationPublicationFails() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setSessionId("session-42");
     session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -139,7 +156,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("处理失败后确认重试发布再确认原消息")
   void shouldPublishRetryBeforeAck() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setSessionId("session-42");
     session.setQuestionsJson("not-json");
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -156,7 +173,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("最终失败后发布死信并确认原消息")
   void shouldPublishDeadAfterRetries() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setSessionId("session-42");
     session.setQuestionsJson("not-json");
     when(sessionRepository.findBySessionIdWithResume("session-42"))
@@ -173,7 +190,7 @@ class InterviewEvaluationRabbitConsumerTest {
   @DisplayName("评估题号或类别键校验失败时重试消息且不保存报告")
   void shouldNotPersistInvalidEvaluation() throws Exception {
     InterviewSessionEntity session = new InterviewSessionEntity();
-    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
+    session.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
     session.setSessionId("session-42");
     session.setQuestionsJson(new ObjectMapper().writeValueAsString(List.of(
         InterviewQuestionDTO.create(0, "索引？", "MYSQL", "MySQL"))));

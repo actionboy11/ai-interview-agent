@@ -161,6 +161,7 @@ class StableCategoryEvaluationTest {
     session.setQuestionsJson("[]");
     session.setOwner(UserEntity.builder().id(UUID.randomUUID()).build());
     when(sessions.findBySessionIdWithResume("session")).thenReturn(Optional.of(session));
+    when(sessions.findBySessionIdForDerivation("session")).thenReturn(Optional.of(session));
     when(answers.findBySession_SessionIdOrderByQuestionIndex("session")).thenReturn(List.of());
     when(skills.getSkill("java-backend")).thenReturn(new InterviewSkillService.SkillDTO(
         "java-backend", "Java", "", List.of(new InterviewSkillService.SkillCategoryDTO(

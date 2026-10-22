@@ -3,6 +3,7 @@ package interview.guide.modules.resume.listener;
 import interview.guide.common.async.AbstractStreamConsumer;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.resume.model.ResumeEntity;
@@ -90,8 +91,9 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
 
     @Override
     protected boolean shouldSkip(AnalyzePayload payload) {
-        return resumeRepository.findById(payload.resumeId())
-            .map(resume -> resume.getAnalyzeStatus() == AsyncTaskStatus.COMPLETED)
+        return resumeRepository.findByIdForWorker(payload.resumeId())
+            .map(resume -> resume.getOwner().getStatus() != UserStatus.ACTIVE
+                || resume.getAnalyzeStatus() == AsyncTaskStatus.COMPLETED)
             .orElse(true);
     }
 
@@ -103,13 +105,14 @@ public class AnalyzeStreamConsumer extends AbstractStreamConsumer<AnalyzeStreamC
     @Override
     protected void processBusiness(AnalyzePayload payload) {
         Long resumeId = payload.resumeId();
-        if (!resumeRepository.existsById(resumeId)) {
+        ResumeEntity resume = resumeRepository.findByIdForWorker(resumeId).orElse(null);
+        if (resume == null || resume.getOwner().getStatus() != UserStatus.ACTIVE) {
             log.warn("简历已被删除，跳过分析任务: resumeId={}", resumeId);
             return;
         }
 
-        ResumeAnalysisResponse analysis = gradingService.analyzeResume(payload.content());
-        ResumeEntity resume = resumeRepository.findById(resumeId).orElse(null);
+        ResumeAnalysisResponse analysis = gradingService.analyzeResume(resume.getResumeText());
+        resume = resumeRepository.findById(resumeId).orElse(null);
         if (resume == null) {
             log.warn("简历在分析期间被删除，跳过保存结果: resumeId={}", resumeId);
             return;

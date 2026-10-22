@@ -5,7 +5,7 @@ import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.RedisService;
-import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
@@ -28,16 +28,16 @@ public class EvaluateStreamProducer
     extends AbstractStreamProducer<String>
     implements InterviewEvaluationTaskPublisher {
 
-    private final InterviewSessionRepository sessionRepository;
+    private final InterviewPersistenceService persistenceService;
     private final TransactionalExecutor transactionalExecutor;
 
     public EvaluateStreamProducer(
         RedisService redisService,
-        InterviewSessionRepository sessionRepository,
+        InterviewPersistenceService persistenceService,
         TransactionalExecutor transactionalExecutor
     ) {
         super(redisService);
-        this.sessionRepository = sessionRepository;
+        this.persistenceService = persistenceService;
         this.transactionalExecutor = transactionalExecutor;
     }
 
@@ -89,12 +89,6 @@ public class EvaluateStreamProducer
      * 更新评估状态
      */
     private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
-        sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
-            session.setEvaluateStatus(status);
-            if (error != null) {
-                session.setEvaluateError(error.length() > 500 ? error.substring(0, 500) : error);
-            }
-            sessionRepository.save(session);
-        });
+        persistenceService.updateEvaluateStatusInternal(sessionId, status, error);
     }
 }

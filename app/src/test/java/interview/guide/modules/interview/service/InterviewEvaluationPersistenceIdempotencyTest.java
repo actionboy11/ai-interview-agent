@@ -3,6 +3,7 @@ package interview.guide.modules.interview.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.security.CurrentUserProvider;
@@ -50,7 +51,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
     session.setOwner(UserEntity.builder().id(java.util.UUID.randomUUID()).build());
     session.setSessionId("session-42");
     session.setQuestionsJson("[]");
-    when(sessionRepository.findBySessionIdWithResume("session-42"))
+    when(sessionRepository.findBySessionIdForDerivation("session-42"))
         .thenReturn(Optional.of(session));
 
     var result = service.saveReport("session-42", report(), "message-1");
@@ -62,6 +63,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
     assertThat(session.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
     assertThat(session.getStatus())
         .isEqualTo(InterviewSessionEntity.SessionStatus.EVALUATED);
+    verify(sessionRepository).findBySessionIdForDerivation("session-42");
   }
 
   @Test
@@ -72,7 +74,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
     session.setSessionId("session-42");
     session.setQuestionsJson("[]");
     session.setEvaluationMessageId("message-1");
-    when(sessionRepository.findBySessionIdWithResume("session-42"))
+    when(sessionRepository.findBySessionIdForDerivation("session-42"))
         .thenReturn(Optional.of(session));
 
     var result = service.saveReport("session-42", report(), "message-1");
@@ -85,7 +87,7 @@ class InterviewEvaluationPersistenceIdempotencyTest {
   @Test
   @DisplayName("会话不存在时返回缺失结果")
   void shouldReturnMissingSession() {
-    when(sessionRepository.findBySessionIdWithResume("missing")).thenReturn(Optional.empty());
+    when(sessionRepository.findBySessionIdForDerivation("missing")).thenReturn(Optional.empty());
 
     assertThat(service.saveReport("missing", report(), "message-1"))
         .isEqualTo(InterviewPersistenceService.CompletionResult.SESSION_MISSING);

@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.rabbitmq.client.Channel;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
+import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.service.ResumeGradingService;
 import interview.guide.modules.resume.service.ResumePersistenceService;
@@ -53,6 +55,7 @@ class ResumeAnalysisRabbitConsumerTest {
         ResumeEntity resume = new ResumeEntity();
         resume.setId(42L);
         resume.setResumeText("resume text");
+        resume.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
         ResumeAnalysisResponse response = mock(ResumeAnalysisResponse.class);
         when(persistenceService.findByIdInternal(42L)).thenReturn(Optional.of(resume));
         when(gradingService.analyzeResume("resume text")).thenReturn(response);
@@ -74,6 +77,7 @@ class ResumeAnalysisRabbitConsumerTest {
         ResumeEntity resume = new ResumeEntity();
         resume.setId(42L);
         resume.setResumeText("resume text");
+        resume.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.ACTIVE).build());
         var destination = new ResumeAnalysisRetryPolicy.RetryDestination(
             "resume.analysis.retry.10s",
             java.time.Duration.ofSeconds(10),
@@ -87,6 +91,19 @@ class ResumeAnalysisRabbitConsumerTest {
 
         verify(producer).publishRetry(task, destination);
         verify(channel).basicAck(7L, false);
+    }
+
+    @Test
+    void disabledOwnerIsAcknowledgedWithoutModelCall() throws Exception {
+        ResumeEntity resume = new ResumeEntity();
+        resume.setId(42L);
+        resume.setOwner(UserEntity.builder().id(UUID.randomUUID()).status(UserStatus.DISABLED).build());
+        when(persistenceService.findByIdInternal(42L)).thenReturn(Optional.of(resume));
+
+        consumer.consume(task(0), delivery, channel);
+
+        verify(channel).basicAck(7L, false);
+        org.mockito.Mockito.verifyNoInteractions(gradingService);
     }
 
     private ResumeAnalysisMessage task(int retryCount) {

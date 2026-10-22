@@ -7,6 +7,9 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.planning.model.QuestionPlan;
+import interview.guide.modules.interview.planning.model.QuestionSlot;
+import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
 import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.model.AbilityProfileStatus;
 import interview.guide.modules.memory.model.AbilityProposalStatus;
@@ -35,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 public class AbilityEvidenceDerivationService {
   private final InterviewSessionRepository sessions;
   private final InterviewAnswerRepository answers;
+  private final InterviewQuestionPlanRepository plans;
   private final AbilityProfileProposalRepository proposals;
   private final UserAbilityEvidenceRepository evidence;
   private final UserAbilityProfileRepository profiles;
@@ -79,6 +83,7 @@ public class AbilityEvidenceDerivationService {
         .findByOwnerIdAndInterviewSessionId(ownerId, session.getId()).stream()
         .collect(Collectors.toMap(item -> item.getInterviewAnswer().getId(), Function.identity()));
     Map<Integer, InterviewQuestionDTO> questions = questionsByIndex(session);
+    Map<String, String> slotDifficulties = slotDifficulties(session);
     List<UserAbilityEvidenceEntity> newEvidence = new ArrayList<>();
     List<AbilityProfileProposalEntity> newProposals = new ArrayList<>();
 
@@ -126,7 +131,10 @@ public class AbilityEvidenceDerivationService {
         InterviewQuestionDTO question = questions.get(answer.getQuestionIndex());
         item.setTopicSummary(question == null ? null : question.topicSummary());
         item.setQuestionScore(answer.getScore());
-        item.setDifficulty(session.getDifficulty());
+        String slotId = question == null ? null : question.slotId();
+        item.setDifficulty(slotId == null
+            ? session.getDifficulty()
+            : slotDifficulties.getOrDefault(slotId, session.getDifficulty()));
         item.setFeedbackSummary(answer.getFeedback());
         item.setOccurredAt(answer.getAnsweredAt().atZone(ZoneId.systemDefault()).toInstant());
         newEvidence.add(item);
@@ -179,6 +187,20 @@ public class AbilityEvidenceDerivationService {
         new TypeReference<>() {});
     return questions.stream().collect(Collectors.toMap(InterviewQuestionDTO::questionIndex,
         Function.identity(), (first, ignored) -> first));
+  }
+
+  private Map<String, String> slotDifficulties(InterviewSessionEntity session) {
+    return plans.findFirstByOwnerIdAndSessionSessionIdOrderByIdDesc(
+            session.getOwner().getId(), session.getSessionId())
+        .filter(plan -> plan.getSession().getId().equals(session.getId())
+            && plan.getOwner().getId().equals(session.getOwner().getId()))
+        .map(plan -> objectMapper.readValue(plan.getPlanJson(), QuestionPlan.class))
+        .map(plan -> plan.slots().stream()
+            .filter(slot -> slot.slotId() != null && slot.targetDifficulty() != null
+                && !slot.targetDifficulty().isBlank())
+            .collect(Collectors.toMap(QuestionSlot::slotId, QuestionSlot::targetDifficulty,
+                (first, ignored) -> first)))
+        .orElseGet(Map::of);
   }
 
   private String summary(List<InterviewAnswerEntity> categoryAnswers) {

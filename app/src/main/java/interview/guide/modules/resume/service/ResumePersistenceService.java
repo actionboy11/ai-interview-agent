@@ -318,7 +318,7 @@ public class ResumePersistenceService {
     }
 
     public Optional<ResumeEntity> findByIdInternal(Long id) {
-        return resumeRepository.findById(id);
+        return resumeRepository.findByIdForWorker(id);
     }
 
     private ResumeEntity requireOwnedResume(Long id) {
