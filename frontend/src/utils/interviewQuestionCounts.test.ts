@@ -86,3 +86,45 @@ test('旧问题缺少元数据或父题关系无效时不猜测奇偶配对', ()
     { questionIndex: 1, isFollowUp: true, parentQuestionIndex: 0 },
   ]), null);
 });
+
+test('损坏旧题目包含空条目时仍可读取已保存答案的题号', () => {
+  const questions = [null, { questionIndex: 4, question: 'Q', score: {} }];
+  const original = structuredClone(questions);
+  assert.equal(getInterviewFollowUpLabel(4, questions), null);
+  assert.deepEqual(questions, original);
+});
+
+test('父题查找跳过空值和损坏条目并保留原始顺序及题号', () => {
+  const questions = [
+    { questionIndex: 8, isFollowUp: true, parentQuestionIndex: 2 },
+    null, undefined, 'invalid', 7, [], {},
+    { questionIndex: '2', isFollowUp: false },
+    { questionIndex: 2, isFollowUp: false },
+  ];
+  const original = structuredClone(questions);
+  assert.equal(getInterviewFollowUpLabel(8, questions), '第3道主问题的追问');
+  assert.deepEqual(questions, original);
+});
+
+test('原始题目集合形状无效时不显示追问归属', () => {
+  for (const questions of [null, {}, 'invalid', 7, { find: 'invalid' }]) {
+    assert.equal(getInterviewFollowUpLabel(4, questions), null);
+  }
+});
+
+test('损坏的题号或追问元数据不生成归属标签', () => {
+  for (const questionIndex of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(getInterviewFollowUpLabel(questionIndex, [
+      { questionIndex, isFollowUp: true, parentQuestionIndex: 2 },
+      { questionIndex: 2, isFollowUp: false },
+    ]), null);
+  }
+  assert.equal(getInterviewFollowUpLabel(8, [
+    null, false, {}, { questionIndex: 8, isFollowUp: 'true', parentQuestionIndex: 2 },
+    { questionIndex: 2, isFollowUp: false },
+  ]), null);
+  assert.equal(getInterviewFollowUpLabel(8, [
+    { questionIndex: 8, isFollowUp: true, parentQuestionIndex: 2 },
+    null, { questionIndex: 2, isFollowUp: 'false' },
+  ]), null);
+});

@@ -42,6 +42,12 @@ pnpm run build
 
 浏览器证据由控制器提供：在 GET-only 的 5175 预览夹具中检查创建文案、计数展示、旧响应降级、追问归属标签；浏览器 console errors 为 `[]`。该证据来自合成夹具，没有真实登录或业务数据，本任务没有重复浏览器操作。
 
+### 最终审查修复验证
+
+最终审查发现旧详情的原始题目数组含 `null` 时，新追问标签查找会阻断已保存答案展示。仅在 `getInterviewFollowUpLabel` 边界验证数组形状，并在问题与父题两个查找中跳过非对象、数组或非法题号；不可用元数据返回无标签，保留原始题序和题号。没有改动答案、后端或持久化数据。
+
+新增4项真实工具函数回归，覆盖 `[null,{questionIndex:4,question:'Q',score:{}}]`、父题查找遇到空值及损坏条目、非数组集合、非法题号/追问标记，并检查输入保持不变。实现前聚焦命令 `pnpm exec node --test src/utils/interviewQuestionCounts.test.ts` 得到9项中5通过、4失败：两个查找分别抛出 `Cannot read properties of null (reading 'questionIndex')`，非数组抛出 `questions?.find is not a function`，非法题号错误生成标签。实现后同命令9/9通过；完整 `pnpm test` 为37/37通过，0失败/跳过/取消；`pnpm run build` exit 0，Vite耗时12.31s。三条命令均仅设置当前进程 `$env:pnpm_config_verify_deps_before_run='warn'`，未安装或修改依赖。既存构建警告保持不变；本轮未重复浏览器验证，后端688项证据沿用控制器提供的最新执行结果。
+
 ## 覆盖对应与审查边界
 
 分类覆盖、固定/无画像/故障回退、残余预算、确定排序、整数容量、来源事实与版本兼容由现有 `QuestionCoveragePolicyTest`、`AdaptiveAllocationPolicyTest`、`QuestionPlanValidatorTest` 和 `QuestionPlanningServiceTest` 覆盖；Task4 不重复这些矩阵。实际题数、未知旧数据、旧 DTO 构造、索引兼容、单次 JSON 读取和历史列表无新增逐条查询由 `InterviewQuestionCountServiceTest`、`InterviewQuestionCountsResponseTest` 覆盖。前端共享格式化和父题关系通过现有33项套件覆盖。
