@@ -8,6 +8,7 @@ import interview.guide.infrastructure.mapper.ResumeMapper;
 import interview.guide.modules.interview.model.InterviewHistoryItemDTO;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.interview.service.InterviewQuestionCountService;
 import interview.guide.modules.resume.model.ResumeAnalysisEntity;
 import interview.guide.modules.resume.model.ResumeDetailDTO;
 import interview.guide.modules.resume.model.ResumeEntity;
@@ -38,6 +39,7 @@ public class ResumeHistoryService {
     private final ObjectMapper objectMapper;
     private final ResumeMapper resumeMapper;
     private final InterviewMapper interviewMapper;
+    private final InterviewQuestionCountService questionCounts;
 
     /**
      * 获取所有简历列表
@@ -95,9 +97,11 @@ public class ResumeHistoryService {
         );
 
         // 使用 InterviewMapper 转换面试历史
-        List<InterviewHistoryItemDTO> interviewHistory = interviewMapper.toInterviewHistoryList(
-            interviewPersistenceService.findByResumeId(id)
-        );
+        List<InterviewHistoryItemDTO> interviewHistory = interviewPersistenceService.findByResumeId(id)
+            .stream()
+            .map(session -> interviewMapper.toInterviewHistoryItem(session,
+                questionCounts.fromJson(session.getQuestionsJson())))
+            .toList();
 
         return new ResumeDetailDTO(
             resume.getId(),

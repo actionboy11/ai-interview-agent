@@ -42,6 +42,7 @@ import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewQuestionService;
+import interview.guide.modules.interview.service.InterviewQuestionCountService;
 import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import interview.guide.modules.resume.messaging.ResumeAnalysisTaskPublisher;
@@ -78,7 +79,7 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Import({ResumePersistenceService.class, ResumeHistoryService.class, ResumeDeleteService.class,
     ResumeUploadService.class, InterviewPersistenceService.class, InterviewSessionService.class,
-    InterviewQuestionPlanPersistenceService.class,
+    InterviewQuestionPlanPersistenceService.class, InterviewQuestionCountService.class,
     MemoryDerivationPublicationService.class, AbilityMemoryDeletionService.class,
     AbilityScorePolicy.class,
     InterviewHistoryService.class, InterviewSessionCache.class, FileStorageService.class,

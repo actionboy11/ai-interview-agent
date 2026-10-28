@@ -11,6 +11,7 @@ import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.SessionListItemDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,14 @@ public class InterviewHistoryService {
     private final PdfExportService pdfExportService;
     private final ObjectMapper objectMapper;
     private final InterviewMapper interviewMapper;
+    private final InterviewQuestionCountService questionCounts;
+
+    public List<SessionListItemDTO> listSessions() {
+      return interviewPersistenceService.findAll().stream()
+          .map(session -> interviewMapper.toSessionListItem(session,
+              questionCounts.fromJson(session.getQuestionsJson())))
+          .toList();
+    }
 
     /**
      * 获取面试会话详情
@@ -50,11 +59,15 @@ public class InterviewHistoryService {
         List<Object> referenceAnswers = parseJson(session.getReferenceAnswersJson(), new TypeReference<>() {});
 
         // 解析所有题目（用于构建完整的答案列表）
-        List<InterviewQuestionDTO> allQuestions = parseJson(
-            session.getQuestionsJson(),
-                new TypeReference<>() {
-                }
-        );
+        var counts = questionCounts.fromParsedQuestions(questions);
+        List<InterviewQuestionDTO> allQuestions = null;
+        if (counts.mainQuestionCount() != null) {
+          try {
+            allQuestions = objectMapper.convertValue(questions, new TypeReference<>() {});
+          } catch (JacksonException e) {
+            log.error("转换已解析题目失败，回退到已保存答案", e);
+          }
+        }
 
         // 构建答案详情列表（包含所有题目，未回答的也要显示）
         List<InterviewDetailDTO.AnswerDetailDTO> answerList = buildAnswerDetailList(
@@ -69,7 +82,8 @@ public class InterviewHistoryService {
             strengths,
             improvements,
             referenceAnswers,
-            answerList
+            answerList,
+            counts
         );
     }
 

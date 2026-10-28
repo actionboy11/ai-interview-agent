@@ -11,8 +11,15 @@ public record InterviewSessionDTO(
     int totalQuestions,
     int currentQuestionIndex,
     List<InterviewQuestionDTO> questions,
-    SessionStatus status
+    SessionStatus status,
+    Integer mainQuestionCount,
+    Integer followUpQuestionCount
 ) {
+    public InterviewSessionDTO(String sessionId, String resumeText, int totalQuestions,
+        int currentQuestionIndex, List<InterviewQuestionDTO> questions, SessionStatus status) {
+      this(sessionId, resumeText, totalQuestions, currentQuestionIndex, questions, status, null, null);
+    }
+
     public enum SessionStatus {
         CREATED,      // 会话已创建
         IN_PROGRESS,  // 面试进行中

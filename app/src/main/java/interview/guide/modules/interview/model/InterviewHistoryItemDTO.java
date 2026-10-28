@@ -1,7 +1,5 @@
 package interview.guide.modules.interview.model;
 
-import interview.guide.common.model.AsyncTaskStatus;
-
 import java.time.LocalDateTime;
 
 /**
@@ -16,5 +14,14 @@ public record InterviewHistoryItemDTO(
     String evaluateError,
     Integer overallScore,
     LocalDateTime createdAt,
-    LocalDateTime completedAt
-) {}
+    LocalDateTime completedAt,
+    Integer mainQuestionCount,
+    Integer followUpQuestionCount
+) {
+  public InterviewHistoryItemDTO(Long id, String sessionId, Integer totalQuestions, String status,
+      String evaluateStatus, String evaluateError, Integer overallScore, LocalDateTime createdAt,
+      LocalDateTime completedAt) {
+    this(id, sessionId, totalQuestions, status, evaluateStatus, evaluateError, overallScore,
+        createdAt, completedAt, null, null);
+  }
+}

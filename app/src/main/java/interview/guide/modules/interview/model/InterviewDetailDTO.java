@@ -21,8 +21,20 @@ public record InterviewDetailDTO(
     List<String> strengths,
     List<String> improvements,
     List<Object> referenceAnswers,
-    List<AnswerDetailDTO> answers
+    List<AnswerDetailDTO> answers,
+    Integer mainQuestionCount,
+    Integer followUpQuestionCount
 ) {
+    public InterviewDetailDTO(Long id, String sessionId, Integer totalQuestions, String status,
+        String evaluateStatus, String evaluateError, Integer overallScore, String overallFeedback,
+        LocalDateTime createdAt, LocalDateTime completedAt, List<Object> questions,
+        List<String> strengths, List<String> improvements, List<Object> referenceAnswers,
+        List<AnswerDetailDTO> answers) {
+      this(id, sessionId, totalQuestions, status, evaluateStatus, evaluateError, overallScore,
+          overallFeedback, createdAt, completedAt, questions, strengths, improvements,
+          referenceAnswers, answers, null, null);
+    }
+
     /**
      * 答案详情DTO
      */

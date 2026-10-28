@@ -64,6 +64,7 @@ public class InterviewSessionService {
     private final QuestionPlanningService planningService;
     private final AdaptiveAllocationPolicy allocationPolicy;
     private final InterviewQuestionPlanPersistenceService planPersistence;
+    private final InterviewQuestionCountService questionCounts;
 
     /**
      * 创建新的面试会话
@@ -133,13 +134,16 @@ public class InterviewSessionService {
             generationResumeText != null ? generationResumeText : "",
             request.resumeId(), questions, 0, SessionStatus.CREATED);
 
+        var counts = questionCounts.fromQuestions(questions);
         return new InterviewSessionDTO(
             sessionId,
             generationResumeText != null ? generationResumeText : "",
             questions.size(),
             0,
             questions,
-            SessionStatus.CREATED
+            SessionStatus.CREATED,
+            counts.mainQuestionCount(),
+            counts.followUpQuestionCount()
         );
     }
 
@@ -623,13 +627,16 @@ public class InterviewSessionService {
      */
     private InterviewSessionDTO toDTO(CachedSession session) {
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
+        var counts = questionCounts.fromQuestions(questions);
         return new InterviewSessionDTO(
             session.getSessionId(),
             session.getResumeText(),
             questions.size(),
             session.getCurrentIndex(),
             questions,
-            session.getStatus()
+            session.getStatus(),
+            counts.mainQuestionCount(),
+            counts.followUpQuestionCount()
         );
     }
 

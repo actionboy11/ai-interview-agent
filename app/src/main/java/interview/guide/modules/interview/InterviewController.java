@@ -55,10 +55,7 @@ public class InterviewController {
      */
     @GetMapping("/api/interview/sessions")
     public Result<List<SessionListItemDTO>> listSessions() {
-        List<SessionListItemDTO> items = persistenceService.findAll().stream()
-            .map(SessionListItemDTO::from)
-            .toList();
-        return Result.success(items);
+        return Result.success(historyService.listSessions());
     }
 
     /**

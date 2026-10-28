@@ -45,6 +45,7 @@ import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewQuestionProperties;
 import interview.guide.modules.interview.service.InterviewQuestionService;
+import interview.guide.modules.interview.service.InterviewQuestionCountService;
 import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
 import interview.guide.modules.interview.skill.InterviewSkillService;
@@ -115,7 +116,7 @@ class UserAbilityMemoryJourneyTest {
       UsernameNormalizer.class, AuthUserQueryService.class, AuthResponseMapperImpl.class,
       CurrentUserProvider.class, AbilityEvidenceDerivationService.class,
       AbilityMemoryDeletionService.class, InterviewPersistenceService.class,
-      InterviewSessionService.class, InterviewQuestionService.class,
+      InterviewSessionService.class, InterviewQuestionService.class, InterviewQuestionCountService.class,
       InterviewSessionCache.class, InterviewSkillService.class,
       AbilityProfileCommandService.class, AbilityProfileQueryService.class,
       AbilityScorePolicy.class, AbilityMemoryMapperImpl.class, InterviewController.class,

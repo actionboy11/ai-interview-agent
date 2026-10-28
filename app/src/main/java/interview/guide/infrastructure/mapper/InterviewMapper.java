@@ -3,9 +3,15 @@ package interview.guide.infrastructure.mapper;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewHistoryItemDTO;
+import interview.guide.modules.interview.model.InterviewQuestionCountsDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
-import org.mapstruct.*;
+import interview.guide.modules.interview.model.SessionListItemDTO;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingTarget;
+import org.mapstruct.Named;
+import org.mapstruct.ReportingPolicy;
 
 import java.util.List;
 import java.util.function.Function;
@@ -76,13 +82,16 @@ public interface InterviewMapper {
     @Mapping(target = "improvements", source = "improvements")
     @Mapping(target = "referenceAnswers", source = "referenceAnswers")
     @Mapping(target = "answers", source = "answers")
+    @Mapping(target = "mainQuestionCount", source = "counts.mainQuestionCount")
+    @Mapping(target = "followUpQuestionCount", source = "counts.followUpQuestionCount")
     InterviewDetailDTO toDetailDTO(
         InterviewSessionEntity session,
         List<Object> questions,
         List<String> strengths,
         List<String> improvements,
         List<Object> referenceAnswers,
-        List<InterviewDetailDTO.AnswerDetailDTO> answers
+        List<InterviewDetailDTO.AnswerDetailDTO> answers,
+        InterviewQuestionCountsDTO counts
     );
 
     // ========== InterviewSessionEntity 更新映射 ==========
@@ -111,18 +120,20 @@ public interface InterviewMapper {
     /**
      * InterviewSessionEntity 转换为面试历史列表项 DTO
      */
+    @Mapping(target = "status", expression = "java(session.getStatus().toString())")
+    @Mapping(target = "evaluateStatus", expression = "java(session.getEvaluateStatus() != null ? session.getEvaluateStatus().name() : null)")
+    @Mapping(target = "mainQuestionCount", source = "counts.mainQuestionCount")
+    @Mapping(target = "followUpQuestionCount", source = "counts.followUpQuestionCount")
+    InterviewHistoryItemDTO toInterviewHistoryItem(InterviewSessionEntity session,
+        InterviewQuestionCountsDTO counts);
+
+    @Mapping(target = "mainQuestionCount", source = "counts.mainQuestionCount")
+    @Mapping(target = "followUpQuestionCount", source = "counts.followUpQuestionCount")
+    SessionListItemDTO toSessionListItem(InterviewSessionEntity session,
+        InterviewQuestionCountsDTO counts);
+
     default InterviewHistoryItemDTO toInterviewHistoryItem(InterviewSessionEntity session) {
-        return new InterviewHistoryItemDTO(
-            session.getId(),
-            session.getSessionId(),
-            session.getTotalQuestions(),
-            session.getStatus().toString(),
-            session.getEvaluateStatus() != null ? session.getEvaluateStatus().name() : null,
-            session.getEvaluateError(),
-            session.getOverallScore(),
-            session.getCreatedAt(),
-            session.getCompletedAt()
-        );
+      return toInterviewHistoryItem(session, new InterviewQuestionCountsDTO(null, null));
     }
 
     /**

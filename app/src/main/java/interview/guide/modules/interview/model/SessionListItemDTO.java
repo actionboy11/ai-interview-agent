@@ -19,8 +19,18 @@ public record SessionListItemDTO(
     String evaluateError,
     Integer overallScore,
     LocalDateTime createdAt,
-    LocalDateTime completedAt
+    LocalDateTime completedAt,
+    Integer mainQuestionCount,
+    Integer followUpQuestionCount
 ) {
+    public SessionListItemDTO(String sessionId, String skillId, String difficulty, Long resumeId,
+        int totalQuestions, SessionStatus status, AsyncTaskStatus evaluateStatus,
+        String evaluateError, Integer overallScore, LocalDateTime createdAt,
+        LocalDateTime completedAt) {
+      this(sessionId, skillId, difficulty, resumeId, totalQuestions, status, evaluateStatus,
+          evaluateError, overallScore, createdAt, completedAt, null, null);
+    }
+
     public static SessionListItemDTO from(InterviewSessionEntity e) {
         return new SessionListItemDTO(
             e.getSessionId(),
