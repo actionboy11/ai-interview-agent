@@ -390,7 +390,7 @@ export default function InterviewHubPage() {
                 {config.mode === 'text' && (
                   <div>
                     <label className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                      题目数量
+                      主问题数量
                     </label>
                     <div className="flex gap-2">
                       {[6, 8, 10, 12].map(n => (
@@ -407,6 +407,7 @@ export default function InterviewHubPage() {
                         </button>
                       ))}
                     </div>
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">追问另计，数量以实际生成为准。</p>
                   </div>
                 )}
 

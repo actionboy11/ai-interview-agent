@@ -141,7 +141,7 @@ export default function Interview({
           type: 'interviewer',
           content: q.question,
           category: q.category,
-          questionIndex: i
+          questionIndex: q.questionIndex
         });
         if (q.userAnswer) {
           restoredMessages.push({

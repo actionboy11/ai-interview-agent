@@ -6,6 +6,8 @@ export interface InterviewSession {
   sessionId: string;
   resumeText: string;
   totalQuestions: number;
+  mainQuestionCount?: number | null;
+  followUpQuestionCount?: number | null;
   currentQuestionIndex: number;
   questions: InterviewQuestion[];
   status: 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'EVALUATED';
@@ -13,6 +15,8 @@ export interface InterviewSession {
 
 export interface InterviewQuestion {
   questionIndex: number;
+  isFollowUp?: boolean;
+  parentQuestionIndex?: number | null;
   slotId?: string | null;
   question: string;
   type: string;

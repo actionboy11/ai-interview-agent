@@ -1,7 +1,8 @@
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {getScoreColor} from '../utils/score';
-import type {InterviewDetail} from '../api/history';
+import type {AnswerItem, InterviewDetail} from '../api/history';
+import {formatInterviewQuestionCounts, getInterviewFollowUpLabel} from '../utils/interviewQuestionCounts';
 import {memoryApi} from '../api/memory';
 import type {AbilityProposal} from '../types/memory';
 import {RefreshCw} from 'lucide-react';
@@ -9,7 +10,7 @@ import AbilityProposalCard from './AbilityProposalCard';
 import {LatestCollection} from '../utils/latestCollection';
 import QuestionPlanExplanation from './QuestionPlanExplanation';
 import {interviewApi} from '../api/interview';
-import type {QuestionPlanSummary} from '../types/interview';
+import type {InterviewQuestion, QuestionPlanSummary} from '../types/interview';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -85,6 +86,8 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
         strokeDashoffset={strokeDashoffset}
       />
 
+      <p className="text-sm text-slate-600 dark:text-slate-300">{formatInterviewQuestionCounts(interview)}</p>
+
       <AbilityProposalsSection sessionId={interview.sessionId} evaluationStatus={interview.evaluateStatus} evaluationError={interview.evaluateError} />
 
       <QuestionPlanExplanation plan={planSessionId === interview.sessionId ? plan : null}
@@ -105,6 +108,7 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
       {/* 问答记录详情 */}
         <QuestionsSection
         answers={interview.answers || []}
+        questions={interview.questions}
         expandedQuestions={expandedQuestions}
         toggleQuestion={toggleQuestion}
       />
@@ -284,10 +288,12 @@ function ImprovementsSection({ improvements }: { improvements: string[] }) {
 // 问答部分组件
 function QuestionsSection({
   answers,
+  questions,
   expandedQuestions,
   toggleQuestion
 }: {
-  answers: any[];
+  answers: AnswerItem[];
+  questions?: InterviewQuestion[];
   expandedQuestions: Set<number>;
   toggleQuestion: (index: number) => void;
 }) {
@@ -305,6 +311,7 @@ function QuestionsSection({
           <QuestionCard
             key={idx}
             answer={answer}
+            followUpLabel={getInterviewFollowUpLabel(answer.questionIndex, questions)}
             index={idx}
             isExpanded={expandedQuestions.has(idx)}
             onToggle={() => toggleQuestion(idx)}
@@ -318,11 +325,13 @@ function QuestionsSection({
 // 问题卡片组件
 function QuestionCard({
   answer,
+  followUpLabel,
   index,
   isExpanded,
   onToggle
 }: {
-  answer: any;
+  answer: AnswerItem;
+  followUpLabel: string | null;
   index: number;
   isExpanded: boolean;
   onToggle: () => void;
@@ -339,7 +348,7 @@ function QuestionCard({
             className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
         onClick={onToggle}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span
               className="w-8 h-8 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg flex items-center justify-center text-sm font-semibold">
             {answer.questionIndex + 1}
@@ -365,6 +374,7 @@ function QuestionCard({
 
       {/* 问题内容 */}
       <div className="px-5 pb-2">
+        {followUpLabel && <p className="mb-2 text-xs text-primary-600 dark:text-primary-400">{followUpLabel}</p>}
         <p className="text-slate-800 dark:text-white font-medium leading-relaxed">{answer.question}</p>
       </div>
 

@@ -8,6 +8,7 @@ import {formatDate} from '../utils/date';
 import {getScoreProgressColor} from '../utils/score';
 import {skillApi, type SkillDTO} from '../api/skill';
 import {getTemplateName} from '../utils/voiceInterview';
+import {formatInterviewQuestionCounts} from '../utils/interviewQuestionCounts';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import {
   AlertCircle,
@@ -39,6 +40,8 @@ interface UnifiedInterviewItem {
   evaluateError?: string;
   overallScore: number | null;
   totalQuestions?: number;
+  mainQuestionCount?: number | null;
+  followUpQuestionCount?: number | null;
   actualDuration?: number;
   createdAt: string;
   resumeId?: number;
@@ -245,6 +248,8 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
         evaluateError: session.evaluateError ?? undefined,
         overallScore: session.overallScore,
         totalQuestions: session.totalQuestions,
+        mainQuestionCount: session.mainQuestionCount,
+        followUpQuestionCount: session.followUpQuestionCount,
         createdAt: session.createdAt,
         resumeId: session.resumeId ?? undefined,
       }));
@@ -525,9 +530,9 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      {item.type === 'text' && item.totalQuestions != null ? (
+                      {item.type === 'text' ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-sm">
-                          {item.totalQuestions} 题
+                          {formatInterviewQuestionCounts(item)}
                         </span>
                       ) : item.type === 'voice' ? (
                         <span className="text-sm text-slate-500 dark:text-slate-400">

@@ -15,6 +15,8 @@ export interface TextSessionMeta {
   difficulty: string;
   resumeId: number | null;
   totalQuestions: number;
+  mainQuestionCount?: number | null;
+  followUpQuestionCount?: number | null;
   status: string;
   evaluateStatus: string | null;
   evaluateError: string | null;

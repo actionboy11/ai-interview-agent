@@ -3,6 +3,7 @@ import {motion} from 'framer-motion';
 import {CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {formatDateOnly} from '../utils/date';
 import {getScoreColor} from '../utils/score';
+import {formatInterviewQuestionCounts} from '../utils/interviewQuestionCounts';
 import type {InterviewItem} from '../api/history';
 import {historyApi} from '../api/history';
 import ConfirmDialog from './ConfirmDialog';
@@ -242,14 +243,14 @@ function InterviewItemCard({
         <p className="font-medium text-slate-800 dark:text-white truncate">
           模拟面试 #{total - index}
         </p>
-        <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
           <span className="flex items-center gap-1">
-            <Calendar className="w-4 h-4" />
+            <Calendar className="w-4 h-4 shrink-0" />
             {formatDateOnly(interview.createdAt)}
           </span>
           <span className="flex items-center gap-1">
-            <MessageSquare className="w-4 h-4" />
-            {interview.totalQuestions} 题
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            {formatInterviewQuestionCounts(interview)}
           </span>
         </div>
       </div>

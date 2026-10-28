@@ -1,4 +1,5 @@
 import { request } from './request';
+import type { InterviewQuestion } from '../types/interview';
 
 export type AnalyzeStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export type EvaluateStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -41,6 +42,8 @@ export interface InterviewItem {
   id: number;
   sessionId: string;
   totalQuestions: number;
+  mainQuestionCount?: number | null;
+  followUpQuestionCount?: number | null;
   status: string;
   evaluateStatus?: EvaluateStatus;
   evaluateError?: string;
@@ -48,7 +51,7 @@ export interface InterviewItem {
   overallFeedback: string | null;
   createdAt: string;
   completedAt: string | null;
-  questions?: unknown[];
+  questions?: InterviewQuestion[];
   strengths?: string[];
   improvements?: string[];
   referenceAnswers?: unknown[];

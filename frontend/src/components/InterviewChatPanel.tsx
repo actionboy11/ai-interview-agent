@@ -4,6 +4,7 @@ import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import type {InterviewQuestion, InterviewSession} from '../types/interview';
 import {Send} from 'lucide-react';
 import InterviewMessageBubble from './InterviewMessageBubble';
+import {formatInterviewQuestionCounts} from '../utils/interviewQuestionCounts';
 
 interface Message {
   type: 'interviewer' | 'user';
@@ -60,12 +61,13 @@ export default function InterviewChatPanel({
             className="bg-white dark:bg-slate-800 rounded-2xl p-6 mb-4 shadow-sm dark:shadow-slate-900/50 border border-slate-100 dark:border-slate-700">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-            题目 {currentQuestion ? currentQuestion.questionIndex + 1 : 0} / {session.totalQuestions}
+            作答项 {currentQuestion ? currentQuestion.questionIndex + 1 : 0} / {session.totalQuestions}
           </span>
             <span className="text-sm text-slate-500 dark:text-slate-400">
             {Math.round(progress)}%
           </span>
         </div>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{formatInterviewQuestionCounts(session)}</p>
             <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
           <motion.div
             className="h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full"
