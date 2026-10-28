@@ -61,12 +61,10 @@ public class InterviewHistoryService {
         // 解析所有题目（用于构建完整的答案列表）
         var counts = questionCounts.fromParsedQuestions(questions);
         List<InterviewQuestionDTO> allQuestions = null;
-        if (counts.mainQuestionCount() != null) {
-          try {
-            allQuestions = objectMapper.convertValue(questions, new TypeReference<>() {});
-          } catch (JacksonException e) {
-            log.error("转换已解析题目失败，回退到已保存答案", e);
-          }
+        try {
+          allQuestions = objectMapper.convertValue(questions, new TypeReference<>() {});
+        } catch (JacksonException e) {
+          log.error("转换已解析题目失败，回退到已保存答案", e);
         }
 
         // 构建答案详情列表（包含所有题目，未回答的也要显示）

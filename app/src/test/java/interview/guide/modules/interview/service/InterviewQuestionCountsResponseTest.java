@@ -20,6 +20,8 @@ import interview.guide.modules.resume.service.ResumeHistoryService;
 import interview.guide.modules.resume.service.ResumePersistenceService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mapstruct.factory.Mappers;
 import org.mockito.ArgumentMatchers;
 import tools.jackson.databind.ObjectMapper;
@@ -206,6 +208,29 @@ class InterviewQuestionCountsResponseTest {
     assertThat(response.path("totalQuestions").asInt()).isEqualTo(99);
     assertThat(response.path("questions").get(0).path("questionIndex").asInt()).isEqualTo(4);
     assertThat(response.path("answers").isEmpty()).isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "[{\"questionIndex\":\"4\",\"question\":\"旧问题\",\"isFollowUp\":false}]",
+      "[{\"questionIndex\":4,\"question\":\"旧问题\",\"isFollowUp\":\"false\"}]"
+  })
+  @DisplayName("旧题目字段可转换时保留未回答行且严格计数仍未知")
+  void legacyCoercibleQuestionsRetainUnansweredRows(String questionsJson) {
+    var session = entity();
+    session.setQuestionsJson(questionsJson);
+    when(persistence.findBySessionId("s")).thenReturn(Optional.of(session));
+    var service = new InterviewHistoryService(persistence, null, json, mapper, counts);
+
+    var response = json.valueToTree(service.getInterviewDetail("s"));
+
+    assertThat(response.path("answers").size()).isEqualTo(1);
+    assertThat(response.path("answers").get(0).path("questionIndex").asInt()).isEqualTo(4);
+    assertThat(response.path("answers").get(0).path("question").asString()).isEqualTo("旧问题");
+    assertThat(response.path("answers").get(0).path("userAnswer").isNull()).isTrue();
+    assertThat(response.path("mainQuestionCount").isNull()).isTrue();
+    assertThat(response.path("followUpQuestionCount").isNull()).isTrue();
+    assertThat(response.path("totalQuestions").asInt()).isEqualTo(99);
   }
 
   private InterviewSessionEntity entity() {
