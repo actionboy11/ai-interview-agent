@@ -41,7 +41,11 @@ class QuestionPlanningServiceTest {
 
     var result = service.plan(command());
 
-    assertThat(result.slots()).hasSize(5);
+    assertThat(result.slots()).hasSize(6);
+    assertThat(result.version()).isEqualTo(2);
+    assertThat(result.slots().stream().map(slot -> slot.categoryKey()).distinct())
+        .containsExactlyInAnyOrder("PROJECT", "JAVA", "MYSQL", "REDIS", "SPRING",
+            "SYSTEM_DESIGN_SCENARIO");
     verify(memory).profiles(owner, "java-backend");
     verify(memory).confirmedSessionCounts(owner, "java-backend");
   }
@@ -58,14 +62,21 @@ class QuestionPlanningServiceTest {
 
     assertThat(result.mode()).isEqualTo(PlanningMode.FIXED);
     assertThat(result.fallbackReason()).isNotBlank();
-    assertThat(result.slots()).hasSize(5);
+    assertThat(result.slots()).hasSize(6);
+    assertThat(result.version()).isEqualTo(2);
+    assertThat(result.slots().stream().map(slot -> slot.categoryKey()).distinct())
+        .containsExactlyInAnyOrder("PROJECT", "JAVA", "MYSQL", "REDIS", "SPRING",
+            "SYSTEM_DESIGN_SCENARIO");
   }
 
   private static QuestionPlanningCommand command() {
     return new QuestionPlanningCommand("java-backend", List.of(
         new SkillCategoryDTO("PROJECT", "Project", "ALWAYS_ONE", null, false),
         new SkillCategoryDTO("JAVA", "Java", "CORE", null, false),
-        new SkillCategoryDTO("MYSQL", "MySQL", "CORE", null, false)),
-        5, "mid", false, Map.of(), List.of(), Set.of());
+        new SkillCategoryDTO("MYSQL", "MySQL", "CORE", null, false),
+        new SkillCategoryDTO("REDIS", "Redis", "CORE", null, false),
+        new SkillCategoryDTO("SPRING", "Spring", "CORE", null, false),
+        new SkillCategoryDTO("SYSTEM_DESIGN_SCENARIO", "Design", "NORMAL", null, false)),
+        6, "mid", false, Map.of(), List.of(), Set.of());
   }
 }

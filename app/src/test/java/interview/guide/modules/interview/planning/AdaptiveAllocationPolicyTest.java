@@ -36,8 +36,9 @@ class AdaptiveAllocationPolicyTest {
   }
 
   @ParameterizedTest(name = "题量 {0} 保留优先级并精确分配")
-  @CsvSource({"5,1,2,2,0,0", "10,1,4,3,1,1"})
-  @DisplayName("5 与 10 题预算按短缺优先级分配且总数精确")
+  @CsvSource({"5,1,4,0,0,0", "10,1,8,1,0,0", "11,1,9,1,0,0",
+      "13,1,9,2,1,0", "17,1,11,3,1,1"})
+  @DisplayName("先覆盖分类再将剩余预算按四三一一分配")
   void budgets(int total, long mandatory, long baseline, long weakness,
       long exploration, long strength) {
     var plan = policy.plan(command(total, false, categories()), profiles(), Map.of());
@@ -76,11 +77,31 @@ class AdaptiveAllocationPolicyTest {
         profile(4L, "SPRING", AbilityLevel.WEAK, .9, "2026-01-01T00:00:00Z"),
         profile(5L, "MQ", AbilityLevel.WEAK, .9, "2026-01-01T00:00:00Z"));
 
-    var plan = policy.plan(command(10, false, cats), profiles, Map.of());
+    var plan = policy.plan(command(17, false, cats), profiles, Map.of());
     assertThat(plan.slots().stream()
         .filter(slot -> slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT)
         .map(slot -> slot.categoryKey()).toList())
         .containsExactly("MQ", "SPRING", "REDIS");
+  }
+
+  @Test
+  @DisplayName("优势追加使用等级与置信度排序而不是仅按分类键")
+  void ranksStrongProfilesByLevelAndConfidence() {
+    var candidates = List.of(
+        profile(1L, "JAVA", AbilityLevel.PROFICIENT, .99, "2026-01-01T00:00:00Z"),
+        profile(2L, "MYSQL", AbilityLevel.STRONG, .7, "2026-01-01T00:00:00Z"),
+        profile(3L, "REDIS", AbilityLevel.STRONG, .9, "2026-01-01T00:00:00Z"));
+    var plan = policy.plan(command(16, false, categories()), candidates, Map.of());
+
+    assertThat(plan.slots().stream()
+        .filter(slot -> slot.purpose() == QuestionPurpose.STRENGTH_CALIBRATION)
+        .map(slot -> slot.categoryKey())).containsExactly("REDIS");
+    assertThat(plan.slots().stream()
+        .filter(slot -> slot.purpose() == QuestionPurpose.STRENGTH_CALIBRATION))
+        .allSatisfy(slot -> {
+          assertThat(slot.targetDifficulty()).isEqualTo("senior");
+          assertThat(slot.relatedProfileId()).isEqualTo(3L);
+        });
   }
 
   @Test
@@ -135,7 +156,7 @@ class AdaptiveAllocationPolicyTest {
     assertThat(plan.slots()).hasSize(10);
     assertThat(plan.slots().stream().filter(slot ->
         slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT)
-        .map(slot -> slot.categoryKey()).toList()).containsExactly("JAVA", "JAVA", "JAVA");
+        .map(slot -> slot.categoryKey()).toList()).containsExactly("JAVA");
     assertThat(plan.slots().stream().collect(Collectors.groupingBy(
         slot -> slot.categoryKey(), Collectors.counting())).values())
         .allSatisfy(count -> assertThat(count).isLessThanOrEqualTo(3L));
@@ -170,24 +191,22 @@ class AdaptiveAllocationPolicyTest {
     assertThat(plan.slots()).hasSize(10);
     assertThat(plan.slots().getFirst().purpose()).isEqualTo(QuestionPurpose.MANDATORY);
     assertThat(plan.slots().stream().filter(slot ->
-        slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT).count()).isEqualTo(2);
+        slot.purpose() == QuestionPurpose.WEAKNESS_REINFORCEMENT).count()).isEqualTo(1);
     assertThat(plan.slots().stream().filter(slot -> slot.categoryKey().equals("JAVA")).count())
-        .isEqualTo(3);
+        .isEqualTo(2);
   }
 
   @Test
-  @DisplayName("无画像沿用现有 Skill 固定分配，简历存在时按六四分源")
+  @DisplayName("无画像先覆盖分类，简历事实足够时按六四分源")
   void noMemoryUsesExistingAllocation() {
     var command = command(10, true, categories());
     var plan = policy.plan(command, List.of(), Map.of());
     assertThat(plan.mode()).isEqualTo(PlanningMode.FIXED);
     assertThat(plan.resumeSlots()).hasSize(6);
     assertThat(plan.directionSlots()).hasSize(4);
-    assertThat(plan.directionSlots().stream().collect(Collectors.groupingBy(
-        slot -> slot.categoryKey(), Collectors.summingInt(slot -> 1))))
-        .containsExactlyInAnyOrderEntriesOf(skills.calculateAllocation(categories(), 4)
-            .entrySet().stream().filter(entry -> entry.getValue() > 0)
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+    assertThat(plan.slots().stream().map(slot -> slot.categoryKey()).distinct())
+        .containsExactlyInAnyOrder("PROJECT", "JAVA", "MYSQL", "REDIS", "SPRING",
+            "MQ", "OS", "NETWORK");
   }
 
   @Test
@@ -212,9 +231,9 @@ class AdaptiveAllocationPolicyTest {
   }
 
   @Test
-  @DisplayName("没有已验证简历事实时五种用途都只能走方向题")
+  @DisplayName("没有已验证简历事实时所有用途都只能走方向题")
   void ungroundedResumeNeverCreatesResumeSlots() {
-    var command = new QuestionPlanningCommand(SKILL, categories(), 10, "mid", true,
+    var command = new QuestionPlanningCommand(SKILL, categories(), 17, "mid", true,
         Map.of(), List.of(), Set.of());
     var adaptive = policy.plan(command, profiles(), Map.of());
     var fixed = policy.plan(command, List.of(), Map.of());
@@ -224,14 +243,11 @@ class AdaptiveAllocationPolicyTest {
             QuestionPurpose.WEAKNESS_REINFORCEMENT, QuestionPurpose.EXPLORATION,
             QuestionPurpose.STRENGTH_CALIBRATION);
     assertThat(adaptive.resumeSlots()).isEmpty();
-    assertThat(adaptive.directionSlots()).hasSize(10);
+    assertThat(adaptive.directionSlots()).hasSize(17);
     assertThat(fixed.resumeSlots()).isEmpty();
-    assertThat(fixed.directionSlots()).hasSize(10);
-    assertThat(fixed.directionSlots().stream().collect(Collectors.groupingBy(
-        slot -> slot.categoryKey(), Collectors.summingInt(slot -> 1))))
-        .containsExactlyInAnyOrderEntriesOf(skills.calculateAllocation(categories(), 10)
-            .entrySet().stream().filter(entry -> entry.getValue() > 0)
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+    assertThat(fixed.directionSlots()).hasSize(17);
+    assertThat(fixed.slots().stream().map(slot -> slot.categoryKey()).distinct())
+        .hasSize(8);
   }
 
   @Test
@@ -265,7 +281,7 @@ class AdaptiveAllocationPolicyTest {
   }
 
   @Test
-  @DisplayName("只有强项时校准题不超过一成，弱项预算回流基础与探索")
+  @DisplayName("只有强项时弱项预算并入基础，剩余预算仍可探索与校准")
   void strongCalibrationIsCapped() {
     var strong = List.of(profile(3L, "REDIS", AbilityLevel.STRONG, .9,
         "2026-01-03T00:00:00Z"));

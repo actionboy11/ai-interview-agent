@@ -241,13 +241,14 @@ class UserAbilityMemoryJourneyTest {
         .andReturn().getResponse().getContentAsString();
     assertThat((String) JsonPath.read(body, "$.data.mode")).isEqualTo("ADAPTIVE");
     Map<String, Integer> counts = JsonPath.read(body, "$.data.purposeCounts");
-    assertThat(counts).isEqualTo(Map.of("MANDATORY", 1, "BASELINE", 5,
-        "WEAKNESS_REINFORCEMENT", 3, "EXPLORATION", 1, "STRENGTH_CALIBRATION", 0));
+    // Six covered categories leave four slots: weights 5:3:1 yield 2 baseline, 1 weak, 1 explore.
+    assertThat(counts).isEqualTo(Map.of("MANDATORY", 1, "BASELINE", 7,
+        "WEAKNESS_REINFORCEMENT", 1, "EXPLORATION", 1, "STRENGTH_CALIBRATION", 0));
     List<Map<String, Object>> reasons = JsonPath.read(body, "$.data.questions");
     var mysqlWeak = reasons.stream().filter(reason ->
         "MYSQL".equals(reason.get("categoryKey"))
             && "WEAKNESS_REINFORCEMENT".equals(reason.get("purpose"))).toList();
-    assertThat(mysqlWeak).hasSize(3).allSatisfy(reason ->
+    assertThat(mysqlWeak).hasSize(1).allSatisfy(reason ->
         assertThat(reason.get("reason")).isEqualTo("巩固已确认的薄弱项"));
     List<InterviewQuestionDTO> savedQuestions = mapper.readValue(sessions
         .findByOwnerIdAndSessionId(a.getId(), next).orElseThrow().getQuestionsJson(),
