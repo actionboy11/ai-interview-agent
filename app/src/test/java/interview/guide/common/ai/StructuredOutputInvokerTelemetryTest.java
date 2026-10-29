@@ -117,6 +117,55 @@ class StructuredOutputInvokerTelemetryTest {
   class RetryAndFailure {
 
     @Test
+    @DisplayName("语义校验复用同一尝试预算并保留失败响应及真实 Token")
+    void semanticValidationRetainsResponseAndUsage() {
+      var fixture = fixture(false, List.of());
+      when(fixture.callSpec().chatResponse())
+          .thenReturn(response("{\"value\":\"invalid\"}", 10, 4, 14))
+          .thenReturn(response("{\"value\":\"valid\"}", 20, 5, 25));
+
+      Payload result = fixture.invoker().invoke(fixture.client(), "system", "user", CONVERTER,
+          ErrorCode.AI_SERVICE_ERROR, "结构化失败: ", "semantic", "test", "test-model",
+          value -> {
+            if (!"valid".equals(value.value())) {
+              throw new IllegalArgumentException("value must be valid");
+            }
+          }, LoggerFactory.getLogger(StructuredOutputInvokerTelemetryTest.class));
+
+      assertThat(result.value()).isEqualTo("valid");
+      assertThat(fixture.observations()).hasSize(2);
+      var rejected = fixture.observations().getFirst();
+      assertThat(rejected.parseOutcome()).isEqualTo(AiParseOutcome.PARSE_FAILURE);
+      assertThat(rejected.rawResponse()).isEqualTo("{\"value\":\"invalid\"}");
+      assertThat(rejected.promptTokens()).isEqualTo(10);
+      assertThat(rejected.completionTokens()).isEqualTo(4);
+      assertThat(rejected.totalTokens()).isEqualTo(14);
+      assertThat(fixture.observations().getLast().parseOutcome())
+          .isEqualTo(AiParseOutcome.DIRECT_SUCCESS);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    @DisplayName("Schema 校验路径也必须通过语义校验且耗尽后不记录成功")
+    void schemaValidationAlsoRunsSemanticValidation() {
+      var fixture = fixture(true, List.of());
+      var raw = response("{\"value\":\"invalid\"}", 12, 3, 15);
+      when(fixture.callSpec().responseEntity(eq(CONVERTER), any(Consumer.class)))
+          .thenReturn(new ResponseEntity<>(raw, new Payload("invalid")));
+
+      assertThatThrownBy(() -> fixture.invoker().invoke(fixture.client(), "system", "user",
+          CONVERTER, ErrorCode.AI_SERVICE_ERROR, "结构化失败: ", "semantic", value -> {
+            throw new IllegalArgumentException("invalid payload");
+          }, LoggerFactory.getLogger(StructuredOutputInvokerTelemetryTest.class)))
+          .isInstanceOf(BusinessException.class);
+      assertThat(fixture.observations()).hasSize(2).allSatisfy(observation -> {
+        assertThat(observation.parseOutcome()).isEqualTo(AiParseOutcome.PARSE_FAILURE);
+        assertThat(observation.rawResponse()).isEqualTo("{\"value\":\"invalid\"}");
+        assertThat(observation.totalTokens()).isEqualTo(15);
+      });
+    }
+
+    @Test
     @DisplayName("第一次调用失败后第二次成功时分别记录两个尝试")
     void shouldRecordFailedAttemptThenRecoveredAttempt() {
       var fixture = fixture(false, List.of());

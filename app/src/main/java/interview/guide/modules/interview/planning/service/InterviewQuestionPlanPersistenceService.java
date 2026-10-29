@@ -5,6 +5,12 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.model.DynamicInterviewRuntimeEntity;
+import interview.guide.modules.interview.dynamic.dto.DynamicRuntimeSnapshot;
+import interview.guide.modules.interview.dynamic.model.DynamicMainQuestion;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewProperties.PolicySnapshot;
 import interview.guide.modules.interview.planning.model.InterviewQuestionPlanEntity;
 import interview.guide.modules.interview.planning.model.QuestionPlan;
 import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
@@ -25,6 +31,7 @@ public class InterviewQuestionPlanPersistenceService {
   private final UserRepository users;
   private final ResumeRepository resumes;
   private final ObjectMapper mapper;
+  private final DynamicInterviewRuntimeRepository runtimes;
 
   @Transactional
   public void createShell(String sessionId, UUID ownerId, Long resumeId, String provider,
@@ -63,6 +70,31 @@ public class InterviewQuestionPlanPersistenceService {
     session.setTotalQuestions(questions.size());
     session.setQuestionsJson(mapper.writeValueAsString(questions));
     sessions.save(session);
+  }
+
+  @Transactional
+  public DynamicRuntimeSnapshot finishDynamic(String sessionId, UUID ownerId,
+      List<DynamicMainQuestion> pool, PolicySnapshot policy) {
+    var session = requireShell(sessionId, ownerId);
+    if (session.getQuestionsJson() != null || pool.isEmpty()
+        || pool.size() != policy.totalFollowUpBudget()) {
+      throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+          "动态主问题池与面试政策不一致");
+    }
+    var main = pool.getFirst();
+    var first = InterviewQuestionDTO.planned(0, main.question(), main.type(), main.category(),
+        main.topicSummary(), false, null, main.slotId());
+    var runtime = new DynamicInterviewRuntimeEntity(session, mapper.writeValueAsString(pool),
+        mapper.writeValueAsString(policy), pool.size(), main.slotId(), policy.maxFollowUpsPerGroup(),
+        policy.decisionTimeoutSeconds());
+    session.setExecutionMode(InterviewExecutionMode.DYNAMIC_FOLLOW_UP);
+    session.setQuestionsJson(mapper.writeValueAsString(List.of(first)));
+    session.setTotalQuestions(1);
+    session.setCurrentQuestionIndex(0);
+    sessions.saveAndFlush(session);
+    runtimes.saveAndFlush(runtime);
+    return new DynamicRuntimeSnapshot(sessionId, runtime.getVersion(), runtime.getPhase(),
+        pool.size(), 1, 0, 0, 1, 1, 0, first, null, null);
   }
 
   @Transactional

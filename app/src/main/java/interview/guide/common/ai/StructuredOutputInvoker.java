@@ -15,6 +15,7 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.function.Consumer;
 
 /**
  * 统一封装结构化输出调用与重试策略。
@@ -86,6 +87,39 @@ public class StructuredOutputInvoker {
         String model,
         Logger log
     ) {
+        return invoke(chatClient, systemPromptWithFormat, userPrompt, outputConverter,
+            errorCode, errorPrefix, logContext, provider, model, value -> {}, log);
+    }
+
+    /** Semantic validation shares the same bounded attempts as parsing and repair. */
+    public <T> T invoke(
+        ChatClient chatClient,
+        String systemPromptWithFormat,
+        String userPrompt,
+        BeanOutputConverter<T> outputConverter,
+        ErrorCode errorCode,
+        String errorPrefix,
+        String logContext,
+        Consumer<T> validator,
+        Logger log
+    ) {
+        return invoke(chatClient, systemPromptWithFormat, userPrompt, outputConverter,
+            errorCode, errorPrefix, logContext, "unknown", "unknown", validator, log);
+    }
+
+    public <T> T invoke(
+        ChatClient chatClient,
+        String systemPromptWithFormat,
+        String userPrompt,
+        BeanOutputConverter<T> outputConverter,
+        ErrorCode errorCode,
+        String errorPrefix,
+        String logContext,
+        String provider,
+        String model,
+        Consumer<T> validator,
+        Logger log
+    ) {
         // 统计完整调用耗时，包括结构化解析失败后的重试。
         long startNanos = System.nanoTime();
         String securedSystemPrompt = systemPromptWithFormat
@@ -99,6 +133,12 @@ public class StructuredOutputInvoker {
             try {
                 StructuredCallResult<T> result = callStructuredOutput(
                     chatClient, attemptSystemPrompt, userPrompt, outputConverter, logContext, log);
+                try {
+                    validator.accept(result.value());
+                } catch (Exception validationFailure) {
+                    throw new StructuredParseException(result.rawResponse(), result.response(),
+                        validationFailure);
+                }
                 telemetryRecorder.record(toObservation(
                     logContext,
                     provider,

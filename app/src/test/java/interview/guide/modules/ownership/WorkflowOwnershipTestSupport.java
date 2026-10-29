@@ -27,6 +27,7 @@ import interview.guide.modules.memory.repository.UserAbilityProfileRepository;
 import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.memory.service.AbilityScorePolicy;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
 import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
@@ -92,7 +93,7 @@ abstract class WorkflowOwnershipTestSupport {
   @Configuration(proxyBeanMethods = false)
   @EnableJpaRepositories(basePackageClasses = {ResumeAnalysisDeadLetterRepository.class,
       InterviewEvaluationDeadLetterRepository.class, UserAbilityProfileRepository.class,
-      InterviewQuestionPlanRepository.class})
+      InterviewQuestionPlanRepository.class, DynamicInterviewRuntimeRepository.class})
   static class DeadLetterConfiguration {
   }
 

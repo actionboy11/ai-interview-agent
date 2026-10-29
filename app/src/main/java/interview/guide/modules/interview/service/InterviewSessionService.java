@@ -19,7 +19,7 @@ import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
-import interview.guide.modules.interview.planning.ResumeFactGrounding;
+import interview.guide.modules.interview.planning.InterviewPlanningContextFactory;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
 import interview.guide.modules.interview.planning.model.QuestionPlan;
@@ -40,8 +40,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 面试会话管理服务
@@ -99,13 +97,8 @@ public class InterviewSessionService {
             persistenceService.getHistoricalQuestions(skillId, request.resumeId());
         SkillDTO skill = questionService.resolveSkillForPlanning(skillId,
             request.customCategories(), request.jdText());
-        Set<String> grounded = new ResumeFactGrounding().grounded(resumeText, skill.categories());
-        Map<String, Integer> recentCoverage = historicalQuestions.stream()
-            .filter(question -> question.type() != null)
-            .collect(Collectors.toMap(HistoricalQuestion::type, question -> 1, Integer::sum));
-        QuestionPlanningCommand command = new QuestionPlanningCommand(skillId, skill.categories(),
-            request.questionCount(), difficulty, resumeText != null
-                && !resumeText.isBlank(), recentCoverage, historicalQuestions, grounded);
+        QuestionPlanningCommand command = InterviewPlanningContextFactory.create(skillId, skill,
+            request.questionCount(), difficulty, resumeText, historicalQuestions);
         QuestionPlan plan = planningService.plan(command);
         planPersistence.createShell(sessionId, ownerId, request.resumeId(),
             request.llmProvider(), skillId, difficulty, plan);

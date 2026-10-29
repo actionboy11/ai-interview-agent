@@ -146,6 +146,15 @@ public class DynamicInterviewRuntimeEntity {
 
   public DynamicInterviewRuntimeEntity(InterviewSessionEntity session, String mainQuestionsJson,
       String policyJson, int plannedMainQuestionCount, String firstSlotId) {
+    this(session, mainQuestionsJson, policyJson, plannedMainQuestionCount, firstSlotId, 2, 30);
+  }
+
+  public DynamicInterviewRuntimeEntity(InterviewSessionEntity session, String mainQuestionsJson,
+      String policyJson, int plannedMainQuestionCount, String firstSlotId,
+      int maxFollowUpsPerGroup, int decisionTimeoutSeconds) {
+    if (maxFollowUpsPerGroup != 2 || decisionTimeoutSeconds <= 0) {
+      throw new IllegalArgumentException("动态政策要求每组最多两次追问且超时为正整数秒");
+    }
     this.session = session;
     this.owner = session.getOwner();
     this.mainQuestionsJson = mainQuestionsJson;
@@ -153,5 +162,7 @@ public class DynamicInterviewRuntimeEntity {
     this.plannedMainQuestionCount = plannedMainQuestionCount;
     this.totalFollowUpBudget = plannedMainQuestionCount;
     this.currentSlotId = firstSlotId;
+    this.maxFollowUpsPerGroup = maxFollowUpsPerGroup;
+    this.decisionTimeoutSeconds = decisionTimeoutSeconds;
   }
 }
