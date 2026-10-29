@@ -7,12 +7,14 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 面试答案Repository
  */
 @Repository
 public interface InterviewAnswerRepository extends JpaRepository<InterviewAnswerEntity, Long> {
+    Optional<InterviewAnswerEntity> findBySubmissionOwnerIdAndRequestId(UUID ownerId, UUID requestId);
     
     /**
      * 根据会话查找所有答案
