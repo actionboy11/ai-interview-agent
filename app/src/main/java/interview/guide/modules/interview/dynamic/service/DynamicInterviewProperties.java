@@ -19,6 +19,8 @@ public class DynamicInterviewProperties {
   @Max(2)
   private int maxFollowUpsPerMain = 2;
   private Duration decisionTimeout = Duration.ofSeconds(30);
+  @Min(1)
+  private int maxAnswerLength = 20000;
 
   @AssertTrue(message = "动态决策超时必须为正整数秒且不超过整数上限")
   public boolean isDecisionTimeoutValid() {

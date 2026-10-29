@@ -13,6 +13,7 @@ import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 import java.util.function.Consumer;
@@ -37,11 +38,11 @@ public class StructuredOutputInvoker {
     private final int errorMessageMaxLength;
     private final boolean schemaValidationEnabled;
     private final AiCallTelemetryRecorder telemetryRecorder;
+    private final StructuredOutputDeadlineExecutor deadlineExecutor;
 
-    public StructuredOutputInvoker(
-        StructuredOutputProperties properties,
-        AiCallTelemetryRecorder telemetryRecorder
-    ) {
+    @Autowired
+    public StructuredOutputInvoker(StructuredOutputProperties properties,
+        AiCallTelemetryRecorder telemetryRecorder, StructuredOutputDeadlineExecutor executor) {
         this.maxAttempts = Math.max(1, properties.getStructuredMaxAttempts());
         this.includeLastErrorInRetryPrompt = properties.isStructuredIncludeLastError();
         this.retryUseRepairPrompt = properties.isStructuredRetryUseRepairPrompt();
@@ -49,6 +50,30 @@ public class StructuredOutputInvoker {
         this.errorMessageMaxLength = Math.max(20, properties.getStructuredErrorMessageMaxLength());
         this.schemaValidationEnabled = properties.isStructuredSchemaValidationEnabled();
         this.telemetryRecorder = telemetryRecorder;
+        this.deadlineExecutor = executor;
+    }
+
+    /**
+     * Absolute deadline includes queueing, calls and all repair attempts. Uses local conversion plus
+     * the required semantic validator, not Spring AI's nested schema-validation retries or a full
+     * JSON Schema engine. Legacy overloads retain their configured schema-validation behavior.
+     */
+    public <T> T invoke(ChatClient client, String system, String user,
+        BeanOutputConverter<T> converter, ErrorCode errorCode, String prefix, String context,
+        String provider, String model, Consumer<T> validator, Instant deadline, Logger log) {
+        if (deadlineExecutor == null || validator == null) {
+            throw new BusinessException(errorCode, prefix + "deadline执行设施及语义校验器必须提供");
+        }
+        return deadlineExecutor.execute(() -> invokeInternal(client, system, user, converter,
+            errorCode, prefix, context, provider, model, validator, deadline, log),
+            deadline, errorCode, prefix);
+    }
+
+    public StructuredOutputInvoker(
+        StructuredOutputProperties properties,
+        AiCallTelemetryRecorder telemetryRecorder
+    ) {
+        this(properties, telemetryRecorder, null);
     }
 
     public <T> T invoke(
@@ -120,25 +145,37 @@ public class StructuredOutputInvoker {
         Consumer<T> validator,
         Logger log
     ) {
+        return invokeInternal(chatClient, systemPromptWithFormat, userPrompt, outputConverter,
+            errorCode, errorPrefix, logContext, provider, model, validator, null, log);
+    }
+
+    private <T> T invokeInternal(ChatClient chatClient, String systemPromptWithFormat,
+        String userPrompt, BeanOutputConverter<T> outputConverter, ErrorCode errorCode,
+        String errorPrefix, String logContext, String provider, String model,
+        Consumer<T> validator, Instant deadline, Logger log) {
         // 统计完整调用耗时，包括结构化解析失败后的重试。
         long startNanos = System.nanoTime();
         String securedSystemPrompt = systemPromptWithFormat
             + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
         Exception lastError = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (deadline != null) { deadlineExecutor.checkDeadline(deadline, errorCode, errorPrefix); }
             long attemptStartNanos = System.nanoTime();
             String attemptSystemPrompt = attempt == 1
                 ? securedSystemPrompt
                 : buildRetrySystemPrompt(securedSystemPrompt, lastError);
             try {
                 StructuredCallResult<T> result = callStructuredOutput(
-                    chatClient, attemptSystemPrompt, userPrompt, outputConverter, logContext, log);
+                    chatClient, attemptSystemPrompt, userPrompt, outputConverter, logContext,
+                    deadline == null && schemaValidationEnabled, log);
+                if (deadline != null) { deadlineExecutor.checkDeadline(deadline, errorCode, errorPrefix); }
                 try {
                     validator.accept(result.value());
                 } catch (Exception validationFailure) {
                     throw new StructuredParseException(result.rawResponse(), result.response(),
                         validationFailure);
                 }
+                if (deadline != null) { deadlineExecutor.checkDeadline(deadline, errorCode, errorPrefix); }
                 telemetryRecorder.record(toObservation(
                     logContext,
                     provider,
@@ -155,7 +192,8 @@ public class StructuredOutputInvoker {
                 return result.value();
             } catch (Exception e) {
                 lastError = e;
-                boolean terminal = attempt == maxAttempts;
+                boolean cancelled = deadline != null && deadlineExecutor.expired(deadline);
+                boolean terminal = attempt == maxAttempts || cancelled;
                 StructuredParseException parseException = e instanceof StructuredParseException value
                     ? value
                     : null;
@@ -174,19 +212,26 @@ public class StructuredOutputInvoker {
                     parseException == null ? null : parseException.rawResponse(),
                     e
                 ));
-                if (attempt < maxAttempts) {
+                if (deadline != null) {
+                    log.warn("{}结构化调用失败: attempt={}/{}, terminal={}, errorType={}",
+                        logContext, attempt, maxAttempts, terminal, e.getClass().getSimpleName());
+                } else if (attempt < maxAttempts) {
                     log.warn("{}结构化解析失败，准备重试: attempt={}/{}, error={}",
                         logContext, attempt, maxAttempts, e.getMessage());
                 } else {
                     log.error("{}结构化解析失败，已达最大重试次数: attempts={}, error={}",
                         logContext, maxAttempts, e.getMessage());
                 }
+                if (cancelled) {
+                    throw new BusinessException(errorCode, errorPrefix + "决策deadline已耗尽或等待已取消");
+                }
             }
         }
 
         throw new BusinessException(
             errorCode,
-            errorPrefix + (lastError != null ? lastError.getMessage() : "unknown")
+            errorPrefix + (deadline != null ? "结构化解析或语义校验失败"
+                : lastError != null ? lastError.getMessage() : "unknown")
         );
     }
 
@@ -196,13 +241,14 @@ public class StructuredOutputInvoker {
         String userPrompt,
         BeanOutputConverter<T> outputConverter,
         String logContext,
+        boolean validateSchema,
         Logger log
     ) {
         ChatClient.CallResponseSpec call = chatClient.prompt()
             .system(systemPrompt)
             .user(userPrompt)
             .call();
-        if (schemaValidationEnabled) {
+        if (validateSchema) {
             ResponseEntity<ChatResponse, T> result = call.responseEntity(
                 outputConverter,
                 spec -> spec.validateSchema()

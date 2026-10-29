@@ -9,6 +9,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.ai")
 public class StructuredOutputProperties {
 
+    private int structuredDeadlineThreads = 4;
+    private int structuredDeadlineQueueCapacity = 32;
+
     private int structuredMaxAttempts = 2;
     private boolean structuredIncludeLastError = true;
     private boolean structuredRetryUseRepairPrompt = true;

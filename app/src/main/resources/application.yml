@@ -191,6 +191,8 @@ app:
     structured-metrics-enabled: ${APP_AI_STRUCTURED_METRICS_ENABLED:true}
     # 是否启用 Spring AI 2.0 entity schema validation retry（失败时仍受 structured-max-attempts 外层控制）
     structured-schema-validation-enabled: ${APP_AI_STRUCTURED_SCHEMA_VALIDATION_ENABLED:true}
+    structured-deadline-threads: 4
+    structured-deadline-queue-capacity: 32
     rag:
       rewrite:
         enabled: ${APP_AI_RAG_REWRITE_ENABLED:true}
@@ -208,6 +210,7 @@ app:
       enabled: false
       max-follow-ups-per-main: 2
       decision-timeout: 30s
+      max-answer-length: 20000
     evaluation:
       batch-size: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:8}
   resume:
