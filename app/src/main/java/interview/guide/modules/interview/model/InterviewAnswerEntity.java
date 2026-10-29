@@ -1,8 +1,23 @@
 package interview.guide.modules.interview.model;
 
-import jakarta.persistence.*;
-
+import interview.guide.modules.interview.dynamic.model.SubmissionIntent;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.util.UUID;
+import org.hibernate.annotations.Check;
 
 /**
  * 面试答案实体
@@ -11,12 +26,68 @@ import java.time.LocalDateTime;
 @Table(name = "interview_answers",
     uniqueConstraints = {
         @UniqueConstraint(name = "uk_interview_answer_session_question", columnNames = {"session_id", "question_index"}),
-        @UniqueConstraint(name = "uk_interview_answer_scope", columnNames = {"id", "session_id", "category_key"})
+        @UniqueConstraint(name = "uk_interview_answer_scope", columnNames = {"id", "session_id", "category_key"}),
+        @UniqueConstraint(name = "uk_dynamic_answer_source", columnNames = {"id", "session_id", "question_index", "request_id"}),
+        @UniqueConstraint(name = "uk_dynamic_answer_request", columnNames = {"submission_owner_id", "request_id"})
     },
     indexes = {
         @Index(name = "idx_interview_answer_session_question", columnList = "session_id,question_index")
     })
+@Check(name = "ck_dynamic_answer_submission", constraints =
+    "(submission_intent is null and request_id is null and request_fingerprint is null "
+        + "and submission_owner_id is null) or (submission_intent is not null "
+        + "and request_id is not null and request_fingerprint is not null "
+        + "and submission_owner_id is not null)")
 public class InterviewAnswerEntity {
+
+  @Column(name = "session_id", nullable = false, insertable = false, updatable = false)
+  private Long sessionDbId;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "submission_intent", length = 20)
+  private SubmissionIntent submissionIntent;
+
+  @Column(name = "request_id")
+  private UUID requestId;
+
+  @Column(name = "request_fingerprint", length = 64)
+  private String requestFingerprint;
+
+  @Column(name = "submission_owner_id")
+  // Mixed nullability with session_id is enforced by V11's composite FK, not a JPA association.
+  private UUID submissionOwnerId;
+
+  public String getRequestFingerprint() {
+    return requestFingerprint;
+  }
+
+  public void setRequestFingerprint(String requestFingerprint) {
+    this.requestFingerprint = requestFingerprint;
+  }
+
+  public UUID getSubmissionOwnerId() {
+    return submissionOwnerId;
+  }
+
+  public void setSubmissionOwnerId(UUID submissionOwnerId) {
+    this.submissionOwnerId = submissionOwnerId;
+  }
+
+  public SubmissionIntent getSubmissionIntent() {
+    return submissionIntent;
+  }
+
+  public void setSubmissionIntent(SubmissionIntent submissionIntent) {
+    this.submissionIntent = submissionIntent;
+  }
+
+  public UUID getRequestId() {
+    return requestId;
+  }
+
+  public void setRequestId(UUID requestId) {
+    this.requestId = requestId;
+  }
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

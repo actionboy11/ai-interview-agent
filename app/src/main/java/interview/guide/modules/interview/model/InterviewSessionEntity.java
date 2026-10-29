@@ -2,6 +2,7 @@ package interview.guide.modules.interview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.auth.model.UserEntity;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import interview.guide.modules.interview.planning.model.InterviewQuestionPlanEntity;
 import interview.guide.modules.resume.model.ResumeEntity;
 import jakarta.persistence.CascadeType;
@@ -25,6 +26,8 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import org.hibernate.annotations.ColumnDefault;
 
 /**
  * 面试会话实体
@@ -40,6 +43,23 @@ import java.util.List;
     @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt")
 })
 public class InterviewSessionEntity {
+
+  // Explicit scalar mapping lets composite ownership associations resolve during metadata binding.
+  @Column(name = "owner_user_id", nullable = false, insertable = false, updatable = false)
+  private UUID ownerUserId;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "execution_mode", nullable = false, length = 24)
+  @ColumnDefault("'LEGACY_FIXED'")
+  private InterviewExecutionMode executionMode = InterviewExecutionMode.LEGACY_FIXED;
+
+  public InterviewExecutionMode getExecutionMode() {
+    return executionMode == null ? InterviewExecutionMode.LEGACY_FIXED : executionMode;
+  }
+
+  public void setExecutionMode(InterviewExecutionMode executionMode) {
+    this.executionMode = executionMode == null ? InterviewExecutionMode.LEGACY_FIXED : executionMode;
+  }
 
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "owner_user_id", nullable = false,
