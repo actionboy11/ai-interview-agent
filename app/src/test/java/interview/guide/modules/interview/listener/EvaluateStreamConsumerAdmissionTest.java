@@ -10,6 +10,7 @@ import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
+import interview.guide.modules.interview.dynamic.service.DynamicEvaluationOrchestrationService;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -30,7 +31,8 @@ class EvaluateStreamConsumerAdmissionTest {
     var consumer = new EvaluateStreamConsumer(mock(RedisService.class), sessions,
         evaluation, mock(InterviewPersistenceService.class), new ObjectMapper(),
         mock(LlmProviderRegistry.class), mock(InterviewSessionCache.class),
-        mock(MemoryDerivationPublicationService.class));
+        mock(MemoryDerivationPublicationService.class),
+        mock(DynamicEvaluationOrchestrationService.class));
     var session = new InterviewSessionEntity();
     session.setSessionId("text-42");
     session.setQuestionsJson("[]");

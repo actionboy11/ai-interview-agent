@@ -24,6 +24,8 @@ import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicEvaluationOutboxRepository;
 import interview.guide.modules.interview.skill.InterviewSkillService;
 import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.resume.repository.ResumeRepository;
@@ -169,7 +171,9 @@ class StableCategoryEvaluationTest {
     InterviewPersistenceService persistence = new InterviewPersistenceService(sessions, answers,
         mock(ResumeRepository.class), new ObjectMapper(), mock(CurrentUserProvider.class),
         mock(UserRepository.class),
-        mock(AbilityMemoryDeletionService.class));
+        mock(AbilityMemoryDeletionService.class),
+        mock(DynamicInterviewRuntimeRepository.class),
+        mock(DynamicEvaluationOutboxRepository.class));
     EvaluationReport commonReport = new EvaluationReport("session", 1, 83,
         List.of(new EvaluationReport.CategoryScore("MYSQL", "数据库", 83, 1)),
         List.of(new EvaluationReport.QuestionEvaluation(0, "索引？", "MYSQL", "数据库",

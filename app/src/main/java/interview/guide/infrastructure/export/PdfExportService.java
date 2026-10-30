@@ -16,7 +16,9 @@ import com.itextpdf.layout.properties.UnitValue;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
 import interview.guide.modules.resume.model.ResumeEntity;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * PDF导出服务
@@ -202,6 +205,13 @@ public class PdfExportService {
                 .setBold()
                 .setFontColor(getScoreColor(session.getOverallScore()));
             document.add(scoreP);
+        } else if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            document.add(createSectionTitle("综合评分"));
+            document.add(new Paragraph("总分: 未评估"));
+        }
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            document.add(new Paragraph("主问题组等权计分；类别题目数量表示有效主问题组数量。"));
+            addDynamicGroupEvaluations(document, session);
         }
         
         // 总体评价
@@ -261,8 +271,10 @@ public class PdfExportService {
                     .setFontSize(12));
                 document.add(new Paragraph("Q: " + sanitizeText(answer.getQuestion())));
                 document.add(new Paragraph("A: " + sanitizeText(answer.getUserAnswer() != null ? answer.getUserAnswer() : "未回答")));
-                document.add(new Paragraph("得分: " + answer.getScore() + "/100")
-                    .setFontColor(getScoreColor(answer.getScore())));
+                document.add(new Paragraph(answer.getScore() == null ? "得分: 未评估"
+                    : "得分: " + answer.getScore() + "/100")
+                    .setFontColor(answer.getScore() == null ? SECTION_COLOR
+                        : getScoreColor(answer.getScore())));
                 if (answer.getFeedback() != null) {
                     document.add(new Paragraph("评价: " + sanitizeText(answer.getFeedback()))
                         .setItalic());
@@ -276,6 +288,29 @@ public class PdfExportService {
         
         document.close();
         return baos.toByteArray();
+    }
+
+    private void addDynamicGroupEvaluations(Document document, InterviewSessionEntity session) {
+        if (session.getReportJson() == null
+            || session.getStatus() != InterviewSessionEntity.SessionStatus.EVALUATED) { return; }
+        var report = objectMapper.readValue(session.getReportJson(), InterviewReportDTO.class);
+        if (report.groupEvaluations() == null || report.groupEvaluationSchemaVersion() == null) {
+            return;
+        }
+        document.add(createSectionTitle("主问题组评价"));
+        for (var group : report.groupEvaluations()) {
+            document.add(new Paragraph(group.slotId() + " — "
+                + (group.score() == null ? "未评估" : group.score() + "/100")));
+            document.add(new Paragraph(sanitizeText(group.evidenceSummary())));
+            document.add(new Paragraph("来源题号: " + group.supportingQuestionIndexes().stream()
+                .map(index -> Integer.toString(index + 1)).collect(Collectors.joining(", "))));
+        }
+        document.add(createSectionTitle("类别评分"));
+        for (var category : report.categoryScores()) {
+            document.add(new Paragraph(sanitizeText(category.categoryLabel()) + ": "
+                + (category.score() == null ? "未评估" : category.score() + "/100")
+                + "；有效主问题组: " + category.questionCount()));
+        }
     }
     
     private Paragraph createSectionTitle(String title) {

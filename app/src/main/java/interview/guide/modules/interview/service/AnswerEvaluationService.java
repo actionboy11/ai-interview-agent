@@ -11,6 +11,7 @@ import interview.guide.modules.interview.model.InterviewReportDTO.CategoryScore;
 import interview.guide.modules.interview.model.InterviewReportDTO.QuestionEvaluation;
 import interview.guide.modules.interview.model.InterviewReportDTO.ReferenceAnswer;
 import interview.guide.modules.interview.skill.InterviewSkillService;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -49,9 +50,12 @@ public class AnswerEvaluationService {
         log.info("开始评估面试: {}, 共{}题", sessionId, questions.size());
 
         try {
-            String skillId = persistenceService.findBySessionIdInternal(sessionId)
-                .map(s -> s.getSkillId())
-                .orElse(null);
+            var session = persistenceService.findBySessionIdInternal(sessionId).orElse(null);
+            if (session != null
+                && session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "动态面试必须使用冻结正式组评价");
+            }
+            String skillId = session == null ? null : session.getSkillId();
             Map<String, String> localLabels = localCategoryLabels(skillId);
 
             // Session 题目的 type 是可信稳定键；预设 Skill 元数据是标签来源。

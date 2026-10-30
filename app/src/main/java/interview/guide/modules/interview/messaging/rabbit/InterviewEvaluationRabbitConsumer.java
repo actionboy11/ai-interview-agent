@@ -10,6 +10,8 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.service.DynamicEvaluationOrchestrationService;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
@@ -42,6 +44,7 @@ public class InterviewEvaluationRabbitConsumer {
   private final InterviewEvaluationRetryPolicy retryPolicy;
   private final InterviewSessionCache sessionCache;
   private final MemoryDerivationPublicationService memoryPublication;
+  private final DynamicEvaluationOrchestrationService dynamicEvaluation;
 
   public InterviewEvaluationRabbitConsumer(
       InterviewSessionRepository sessionRepository,
@@ -52,7 +55,8 @@ public class InterviewEvaluationRabbitConsumer {
       InterviewEvaluationRabbitProducer producer,
       InterviewEvaluationRetryPolicy retryPolicy,
       InterviewSessionCache sessionCache,
-      MemoryDerivationPublicationService memoryPublication
+      MemoryDerivationPublicationService memoryPublication,
+      DynamicEvaluationOrchestrationService dynamicEvaluation
   ) {
     this.sessionRepository = sessionRepository;
     this.evaluationService = evaluationService;
@@ -63,6 +67,7 @@ public class InterviewEvaluationRabbitConsumer {
     this.retryPolicy = retryPolicy;
     this.sessionCache = sessionCache;
     this.memoryPublication = memoryPublication;
+    this.dynamicEvaluation = dynamicEvaluation;
   }
 
   @RabbitListener(
@@ -88,6 +93,22 @@ public class InterviewEvaluationRabbitConsumer {
         && !session.getOwner().getId().equals(session.getResume().getOwner().getId()))) {
       log.warn("Discarding inconsistent ownership graph: sessionId={}", task.sessionId());
       channel.basicAck(deliveryTag, false);
+      return;
+    }
+    if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+      InterviewPersistenceService.CompletionResult dynamicCompletion;
+      try {
+        // Retries change the delivery ID; the outbox identity is always the original ID.
+        dynamicCompletion = dynamicEvaluation.evaluate(task.sessionId(), task.originalMessageId());
+      } catch (Exception failure) {
+        routeFailure(task, deliveryTag, channel, failure);
+        return;
+      }
+      if (dynamicCompletion == InterviewPersistenceService.CompletionResult.SESSION_MISSING) {
+        channel.basicAck(deliveryTag, false);
+      } else {
+        publishCompletedDerivation(session, deliveryTag, channel);
+      }
       return;
     }
     if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {

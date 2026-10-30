@@ -11,6 +11,8 @@ import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.InterviewReportDTO;
+import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.interview.model.SessionListItemDTO;
 import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
 import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
@@ -86,7 +88,7 @@ public class InterviewHistoryService {
         );
 
         // 使用 MapStruct 组装最终 DTO
-        return interviewMapper.toDetailDTO(
+        var detail = interviewMapper.toDetailDTO(
             session,
             questions,
             strengths,
@@ -96,6 +98,14 @@ public class InterviewHistoryService {
             counts,
             plannedCount
         );
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP
+            && session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+            && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED
+            && session.getReportJson() != null) {
+            return detail.withFormalReport(objectMapper.readValue(session.getReportJson(),
+                InterviewReportDTO.class));
+        }
+        return detail;
     }
 
     /**

@@ -14,6 +14,8 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.service.DynamicEvaluationOrchestrationService;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.LinkedHashMap;
 
 /**
  * 面试评估 Stream 消费者
@@ -50,6 +53,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final LlmProviderRegistry llmProviderRegistry;
     private final InterviewSessionCache sessionCache;
     private final MemoryDerivationPublicationService memoryPublication;
+    private final DynamicEvaluationOrchestrationService dynamicEvaluation;
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -59,7 +63,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         ObjectMapper objectMapper,
         LlmProviderRegistry llmProviderRegistry,
         InterviewSessionCache sessionCache,
-        MemoryDerivationPublicationService memoryPublication
+        MemoryDerivationPublicationService memoryPublication,
+        DynamicEvaluationOrchestrationService dynamicEvaluation
     ) {
         super(redisService);
         this.sessionRepository = sessionRepository;
@@ -69,9 +74,12 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.llmProviderRegistry = llmProviderRegistry;
         this.sessionCache = sessionCache;
         this.memoryPublication = memoryPublication;
+        this.dynamicEvaluation = dynamicEvaluation;
     }
 
-    record EvaluatePayload(String sessionId) {}
+    record EvaluatePayload(String sessionId, UUID messageId) {
+      EvaluatePayload(String sessionId) { this(sessionId, null); }
+    }
 
     @Override
     protected String taskDisplayName() {
@@ -105,7 +113,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             log.warn("消息格式错误，跳过: messageId={}", messageId);
             return null;
         }
-        return new EvaluatePayload(sessionId);
+        String stableId = data.get(AsyncTaskStreamConstants.FIELD_MESSAGE_ID);
+        return new EvaluatePayload(sessionId, stableId == null ? null : UUID.fromString(stableId));
     }
 
     @Override
@@ -120,6 +129,20 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
                 if (!hasConsistentOwner(session)
                     || session.getOwner().getStatus() != UserStatus.ACTIVE) {
                     return true;
+                }
+                if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+                    var work = persistenceService.loadDynamicEvaluation(payload.sessionId(),
+                        payload.messageId()).orElse(null);
+                    if (work == null) {
+                        log.warn("丢弃缺失或不匹配冻结身份的动态评价: sessionId={}", payload.sessionId());
+                        return true;
+                    }
+                    if (work.completedReport() != null) {
+                        memoryPublication.publishIfPending(payload.sessionId());
+                        syncEvaluatedStatusToCache(payload.sessionId());
+                        return true;
+                    }
+                    return false;
                 }
                 if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
                     memoryPublication.publishIfPending(payload.sessionId());
@@ -151,6 +174,10 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             log.warn("Discarding inconsistent ownership graph: sessionId={}", sessionId);
             return;
         }
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            dynamicEvaluation.evaluate(sessionId, payload.messageId());
+            return;
+        }
         List<InterviewQuestionDTO> questions = objectMapper.readValue(
             session.getQuestionsJson(),
             new TypeReference<>() {}
@@ -171,7 +198,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
-        persistenceService.saveReport(sessionId, report, UUID.randomUUID().toString());
+        persistenceService.saveReport(sessionId, report, payload.messageId() == null
+            ? UUID.randomUUID().toString() : payload.messageId().toString());
     }
 
     @Override
@@ -186,6 +214,8 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private void syncEvaluatedStatusToCache(String sessionId) {
         try {
             sessionRepository.findBySessionIdWithResume(sessionId).filter(this::hasConsistentOwner)
+                .filter(session -> session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+                    && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED)
                 .ifPresent(session -> sessionCache.updateSessionStatusInternal(
                     session.getOwner().getId(), sessionId, InterviewSessionDTO.SessionStatus.EVALUATED));
         } catch (Exception e) {
@@ -208,10 +238,12 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     @Override
     protected void retryMessage(EvaluatePayload payload, int retryCount) {
         String sessionId = payload.sessionId();
-        Map<String, String> message = Map.of(
-            AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId,
-            AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount)
-        );
+        Map<String, String> message = new LinkedHashMap<>();
+        message.put(AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId);
+        message.put(AsyncTaskStreamConstants.FIELD_RETRY_COUNT, String.valueOf(retryCount));
+        if (payload.messageId() != null) {
+            message.put(AsyncTaskStreamConstants.FIELD_MESSAGE_ID, payload.messageId().toString());
+        }
         // If republishing fails, leave the original pending for Redis reclaim.
         redisService().streamAdd(
             AsyncTaskStreamConstants.INTERVIEW_EVALUATE_STREAM_KEY,

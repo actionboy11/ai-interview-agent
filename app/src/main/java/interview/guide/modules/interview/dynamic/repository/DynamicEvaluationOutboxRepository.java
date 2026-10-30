@@ -14,6 +14,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface DynamicEvaluationOutboxRepository
     extends JpaRepository<DynamicEvaluationOutboxEntity, UUID> {
+  Optional<DynamicEvaluationOutboxEntity> findByMessageId(UUID messageId);
+
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select o from DynamicEvaluationOutboxEntity o where o.messageId = :messageId")
+  Optional<DynamicEvaluationOutboxEntity> findByMessageIdForUpdate(@Param("messageId") UUID messageId);
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select o from DynamicEvaluationOutboxEntity o where o.session.id in :ids order by o.id")
   List<DynamicEvaluationOutboxEntity> lockForDeletion(@Param("ids") List<Long> ids);

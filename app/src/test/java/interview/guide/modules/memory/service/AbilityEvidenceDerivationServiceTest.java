@@ -20,6 +20,8 @@ import interview.guide.modules.interview.planning.model.QuestionSourceMode;
 import interview.guide.modules.interview.planning.repository.InterviewQuestionPlanRepository;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicEvaluationOutboxRepository;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.auth.security.CurrentUserProvider;
@@ -76,9 +78,10 @@ class AbilityEvidenceDerivationServiceTest {
     @Bean
     InterviewPersistenceService interviewPersistence(InterviewSessionRepository sessions,
         InterviewAnswerRepository answers, ResumeRepository resumes, ObjectMapper mapper,
-        UserRepository users) {
+        UserRepository users,
+        DynamicInterviewRuntimeRepository runtimes, DynamicEvaluationOutboxRepository outboxes) {
       return new InterviewPersistenceService(sessions, answers, resumes, mapper,
-          mock(CurrentUserProvider.class), users, mock(AbilityMemoryDeletionService.class));
+          mock(CurrentUserProvider.class), users, mock(AbilityMemoryDeletionService.class), runtimes, outboxes);
     }
   }
 

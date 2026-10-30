@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import interview.guide.common.exception.BusinessException;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
@@ -24,6 +25,8 @@ import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.model.InterviewReportDTO;
+import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.service.InterviewQuestionPlanPersistenceService;
@@ -129,6 +132,18 @@ class DynamicLegacyCompatibilityTest {
     assertThatThrownBy(() -> service.completeInterview("s")).isInstanceOf(BusinessException.class);
     assertThatThrownBy(() -> service.getCurrentQuestion("s")).isInstanceOf(BusinessException.class);
     assertThatThrownBy(() -> service.generateReport("s")).isInstanceOf(BusinessException.class);
+  }
+
+  @Test
+  @DisplayName("动态报告完成后旧读取地址只读取已存报告")
+  void completedDynamicReportIsReadOnly() {
+    entity.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
+    entity.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+    var saved = new InterviewReportDTO("s", 1, null, List.of(), List.of(), "未评估",
+        List.of(), List.of(), List.of(), List.of(), InterviewExecutionMode.DYNAMIC_FOLLOW_UP, 1, 2L);
+    when(persistence.findCompletedReport("s")).thenReturn(Optional.of(saved));
+    assertThat(service.generateReport("s")).isSameAs(saved);
+    verifyNoInteractions(cache);
   }
 
   @Test

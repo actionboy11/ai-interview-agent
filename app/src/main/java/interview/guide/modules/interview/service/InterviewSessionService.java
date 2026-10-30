@@ -535,6 +535,16 @@ public class InterviewSessionService {
      * 生成评估报告
      */
     public InterviewReportDTO generateReport(String sessionId) {
+        var persisted = persistenceService.findBySessionId(sessionId).orElseThrow(
+            () -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+        if (persisted.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            if (persisted.getStatus() != InterviewSessionEntity.SessionStatus.EVALUATED
+                || persisted.getEvaluateStatus() != AsyncTaskStatus.COMPLETED) {
+                throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "正式评价尚未完成");
+            }
+            return persistenceService.findCompletedReport(sessionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "正式报告快照缺失"));
+        }
         CachedSession session = getOrRestoreSession(sessionId);
 
         Optional<InterviewReportDTO> completed = persistenceService.findCompletedReport(sessionId);

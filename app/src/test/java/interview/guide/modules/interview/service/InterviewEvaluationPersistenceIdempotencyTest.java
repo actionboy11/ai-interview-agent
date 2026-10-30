@@ -15,6 +15,8 @@ import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicEvaluationOutboxRepository;
 import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import java.util.List;
@@ -46,7 +48,9 @@ class InterviewEvaluationPersistenceIdempotencyTest {
         new ObjectMapper(),
         currentUser,
         mock(UserRepository.class),
-        mock(AbilityMemoryDeletionService.class)
+        mock(AbilityMemoryDeletionService.class),
+        mock(DynamicInterviewRuntimeRepository.class),
+        mock(DynamicEvaluationOutboxRepository.class)
     );
   }
 

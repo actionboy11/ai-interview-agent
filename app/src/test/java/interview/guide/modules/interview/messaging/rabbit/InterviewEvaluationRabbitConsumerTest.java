@@ -24,6 +24,7 @@ import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.service.AnswerEvaluationService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.MemoryDerivationPublicationService;
+import interview.guide.modules.interview.dynamic.service.DynamicEvaluationOrchestrationService;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -68,7 +69,8 @@ class InterviewEvaluationRabbitConsumerTest {
         producer,
         new InterviewEvaluationRetryPolicy(properties),
         mock(InterviewSessionCache.class),
-        memoryPublication
+        memoryPublication,
+        mock(DynamicEvaluationOrchestrationService.class)
     );
   }
 

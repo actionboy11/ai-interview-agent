@@ -30,6 +30,7 @@ import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRab
 import interview.guide.modules.interview.messaging.rabbit.InterviewEvaluationRetryPolicy;
 import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublisher;
 import interview.guide.modules.interview.listener.EvaluateStreamConsumer;
+import interview.guide.modules.interview.dynamic.service.DynamicEvaluationOrchestrationService;
 import interview.guide.common.constant.AsyncTaskStreamConstants;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
@@ -136,7 +137,7 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
     var consumer = new InterviewEvaluationRabbitConsumer(sessions, evaluation, interviewPersistence,
         mapper, llm, mock(InterviewEvaluationRabbitProducer.class),
         mock(InterviewEvaluationRetryPolicy.class), cache,
-        memoryPublication);
+        memoryPublication, mock(DynamicEvaluationOrchestrationService.class));
     var channel = mock(Channel.class);
     for (String id : List.of(valid.getSessionId(), invalid.getSessionId(), "deleted")) {
       var messageId = UUID.randomUUID();
@@ -164,7 +165,7 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
     when(evaluation.evaluateInterview(any(), eq(valid.getSessionId()), any(), any()))
         .thenReturn(report(valid.getSessionId()));
     var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
-        mapper, llm, cache, memoryPublication);
+        mapper, llm, cache, memoryPublication, mock(DynamicEvaluationOrchestrationService.class));
     for (String id : List.of(valid.getSessionId(), invalid.getSessionId(), "deleted")) {
       ReflectionTestUtils.invokeMethod(consumer, "processMessage", new StreamMessageId(5, 1),
           Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, id));
@@ -195,7 +196,7 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
       return null;
     }).when(memoryPublisher).publish(value.getSessionId());
     var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
-        mapper, llm, cache, memoryPublication);
+        mapper, llm, cache, memoryPublication, mock(DynamicEvaluationOrchestrationService.class));
 
     ReflectionTestUtils.invokeMethod(consumer, "processMessage", new StreamMessageId(20, 1),
         Map.of(AsyncTaskStreamConstants.FIELD_SESSION_ID, value.getSessionId()));
@@ -230,7 +231,7 @@ class TextInterviewOwnershipIntegrationTest extends WorkflowOwnershipTestSupport
       throw new IllegalStateException("Rabbit unavailable");
     }).when(memoryPublisher).publish(value.getSessionId());
     var consumer = new EvaluateStreamConsumer(redis, sessions, evaluation, interviewPersistence,
-        mapper, llm, cache, memoryPublication);
+        mapper, llm, cache, memoryPublication, mock(DynamicEvaluationOrchestrationService.class));
 
     assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(consumer, "processMessage",
         new StreamMessageId(22, 1),

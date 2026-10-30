@@ -13,6 +13,15 @@ import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.model.DynamicInterviewEvaluationSnapshot;
+import interview.guide.modules.interview.dynamic.model.DynamicEvaluationOutboxEntity;
+import interview.guide.modules.interview.dynamic.model.DynamicInterviewRuntimeEntity;
+import interview.guide.modules.interview.dynamic.model.DynamicPhase;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
+import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.repository.DynamicEvaluationOutboxRepository;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewEvaluationService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewTransitionService.FrozenSnapshot;
 import interview.guide.modules.interview.repository.InterviewAnswerRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.resume.model.ResumeEntity;
@@ -32,6 +41,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -50,6 +60,103 @@ public class InterviewPersistenceService {
     private final CurrentUserProvider currentUser;
     private final UserRepository userRepository;
     private final AbilityMemoryDeletionService memoryDeletion;
+    private final DynamicInterviewRuntimeRepository dynamicRuntimes;
+    private final DynamicEvaluationOutboxRepository evaluationOutboxes;
+
+    public record DynamicEvaluationWork(DynamicInterviewEvaluationSnapshot snapshot,
+        String provider, InterviewReportDTO completedReport) {}
+
+    @Transactional(readOnly = true)
+    public Optional<DynamicEvaluationWork> loadDynamicEvaluation(String sessionId, UUID messageId) {
+        if (messageId == null) { return Optional.empty(); }
+        var runtime = dynamicRuntimes.findBySession_SessionId(sessionId).orElse(null);
+        var outbox = evaluationOutboxes.findByMessageId(messageId).orElse(null);
+        if (runtime == null || outbox == null) { return Optional.empty(); }
+        var session = runtime.getSession();
+        if (!validDynamicScope(runtime, outbox, session, messageId, outbox.getFrozenVersion())) {
+            return Optional.empty();
+        }
+        var snapshot = evaluationSnapshot(outbox, session, runtime);
+        InterviewReportDTO completed = null;
+        if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+            && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            if (session.getReportJson() == null) {
+                throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "正式报告快照缺失");
+            }
+            completed = objectMapper.readValue(session.getReportJson(), InterviewReportDTO.class);
+        }
+        return Optional.of(new DynamicEvaluationWork(snapshot, session.getLlmProvider(), completed));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public CompletionResult completeDynamicReport(String sessionId, UUID messageId,
+        long frozenVersion, InterviewReportDTO report) {
+        if (messageId == null) { return CompletionResult.SESSION_MISSING; }
+        // Same lock ordering as completion, deletion and outbox dispatch: runtime -> outbox -> session.
+        var runtime = dynamicRuntimes.findBySessionIdForUpdate(sessionId).orElse(null);
+        if (runtime == null) { return CompletionResult.SESSION_MISSING; }
+        var outbox = evaluationOutboxes.findByMessageIdForUpdate(messageId).orElse(null);
+        if (outbox == null) { return CompletionResult.SESSION_MISSING; }
+        var session = sessionRepository.findBySessionIdForDerivation(sessionId).orElse(null);
+        if (!validDynamicScope(runtime, outbox, session, messageId, frozenVersion)) {
+            return CompletionResult.SESSION_MISSING;
+        }
+        if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
+            && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
+            return CompletionResult.ALREADY_COMPLETED;
+        }
+        var snapshot = evaluationSnapshot(outbox, session, runtime);
+        DynamicInterviewEvaluationService.validateReport(snapshot, report);
+        var actualAnswers = answerRepository.findBySession_SessionIdOrderByQuestionIndex(sessionId)
+            .stream().collect(Collectors.toMap(InterviewAnswerEntity::getQuestionIndex, answer -> answer));
+        for (var group : snapshot.groups()) {
+            for (var frozen : group.answers()) {
+                var actual = actualAnswers.get(frozen.questionIndex());
+                if (actual == null || !Objects.equals(actual.getId(), frozen.answerId())
+                    || !Objects.equals(actual.getRequestId(), frozen.requestId())
+                    || !Objects.equals(actual.getSubmissionOwnerId(), snapshot.ownerId())
+                    || actual.getSubmissionIntent() != frozen.submissionIntent()
+                    || !Objects.equals(actual.getUserAnswer(), frozen.answer())) {
+                    throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "正式作答来源已变化");
+                }
+            }
+        }
+        persistReport(session, report);
+        session.setEvaluateStatus(AsyncTaskStatus.COMPLETED);
+        session.setEvaluateError(null);
+        sessionRepository.save(session);
+        return CompletionResult.CREATED;
+    }
+
+    private boolean validDynamicScope(DynamicInterviewRuntimeEntity runtime,
+        DynamicEvaluationOutboxEntity outbox, InterviewSessionEntity session, UUID messageId,
+        long frozenVersion) {
+        return session != null && hasConsistentOwner(session)
+            && session.getOwner().getStatus() == UserStatus.ACTIVE
+            && session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP
+            && (session.getStatus() == InterviewSessionEntity.SessionStatus.COMPLETED
+                || session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED)
+            && runtime.getPhase() == DynamicPhase.COMPLETED
+            && Objects.equals(runtime.getFrozenVersion(), frozenVersion)
+            && outbox.getFrozenVersion() == frozenVersion
+            && session.getId().equals(runtime.getSession().getId())
+            && session.getId().equals(outbox.getSession().getId())
+            && session.getOwner().getId().equals(runtime.getOwner().getId())
+            && session.getOwner().getId().equals(outbox.getOwner().getId())
+            && messageId.equals(outbox.getMessageId())
+            && messageId.toString().equals(session.getEvaluationMessageId());
+    }
+
+    private DynamicInterviewEvaluationSnapshot evaluationSnapshot(DynamicEvaluationOutboxEntity outbox,
+        InterviewSessionEntity session, DynamicInterviewRuntimeEntity runtime) {
+        var frozen = objectMapper.readValue(outbox.getFrozenSnapshotJson(), FrozenSnapshot.class);
+        if (!session.getSessionId().equals(frozen.sessionId())
+            || !session.getOwner().getId().equals(frozen.ownerId())
+            || !Objects.equals(runtime.getFrozenVersion(), frozen.frozenVersion())) {
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "冻结快照身份无效");
+        }
+        return DynamicInterviewEvaluationSnapshot.fromFrozen(frozen);
+    }
     
     /**
      * 保存新的面试会话（支持可选简历）
@@ -339,6 +446,9 @@ public class InterviewPersistenceService {
             return CompletionResult.SESSION_MISSING;
         }
         InterviewSessionEntity session = sessionOpt.get();
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "动态面试必须使用冻结正式评价入口");
+        }
         if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED
             && session.getStatus() == InterviewSessionEntity.SessionStatus.EVALUATED) {
             return CompletionResult.ALREADY_COMPLETED;
@@ -394,12 +504,15 @@ public class InterviewPersistenceService {
         if (session.getReportJson() != null) {
             return Optional.of(objectMapper.readValue(session.getReportJson(), InterviewReportDTO.class));
         }
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            throw new BusinessException(ErrorCode.INTERVIEW_EVALUATION_FAILED, "正式报告快照缺失");
+        }
         List<InterviewAnswerEntity> answers = answerRepository
             .findBySession_SessionIdOrderByQuestionIndex(sessionId);
         List<InterviewReportDTO.QuestionEvaluation> details = answers.stream()
             .filter(answer -> answer.getScore() != null)
             .map(answer -> new InterviewReportDTO.QuestionEvaluation(
-                answer.getQuestionIndex(), answer.getQuestion(), answer.getCategoryKey(),
+                answer.getQuestionIndex().intValue(), answer.getQuestion(), answer.getCategoryKey(),
                 answer.getCategoryLabel(), answer.getUserAnswer(), answer.getScore(),
                 answer.getFeedback()))
             .toList();

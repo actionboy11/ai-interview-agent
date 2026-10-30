@@ -7,6 +7,7 @@ import interview.guide.modules.interview.model.InterviewQuestionCountsDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SessionListItemDTO;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
@@ -35,7 +36,7 @@ public interface InterviewMapper {
     @Mapping(target = "categoryKey", source = "categoryKey")
     @Mapping(target = "categoryLabel", source = "categoryLabel")
     @Mapping(target = "userAnswer", source = "userAnswer")
-    @Mapping(target = "score", source = "score", qualifiedByName = "nullScoreToZero")
+    @Mapping(target = "score", source = "entity", qualifiedByName = "scoreForMode")
     @Mapping(target = "feedback", source = "feedback")
     InterviewReportDTO.QuestionEvaluation toQuestionEvaluation(InterviewAnswerEntity entity);
 
@@ -173,5 +174,14 @@ public interface InterviewMapper {
     @Named("nullScoreToZero")
     default int nullScoreToZero(Integer value) {
         return value != null ? value : 0;
+    }
+
+    @Named("scoreForMode")
+    default Integer scoreForMode(InterviewAnswerEntity entity) {
+        if (entity.getSession() != null
+            && entity.getSession().getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            return entity.getScore();
+        }
+        return nullScoreToZero(entity.getScore());
     }
 }
