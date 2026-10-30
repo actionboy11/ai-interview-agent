@@ -21,6 +21,21 @@ public class DynamicInterviewProperties {
   private Duration decisionTimeout = Duration.ofSeconds(30);
   @Min(1)
   private int maxAnswerLength = 20000;
+  @Min(1)
+  @Max(1000)
+  private int deliveryBatchSize = 100;
+  private Duration workLease = Duration.ofSeconds(30);
+  private Duration deliveryLease = Duration.ofSeconds(10);
+  private Duration deliveryRetryDelay = Duration.ofSeconds(2);
+
+  @AssertTrue(message = "动态投递与工作租约必须为正时长")
+  public boolean isDeliveryTimingValid() {
+    return positive(workLease) && positive(deliveryLease) && positive(deliveryRetryDelay);
+  }
+
+  private boolean positive(Duration value) {
+    return value != null && !value.isNegative() && !value.isZero();
+  }
 
   @AssertTrue(message = "动态决策超时必须为正整数秒且不超过整数上限")
   public boolean isDecisionTimeoutValid() {

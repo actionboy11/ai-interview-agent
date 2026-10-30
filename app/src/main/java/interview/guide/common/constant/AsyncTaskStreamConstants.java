@@ -16,6 +16,11 @@ public final class AsyncTaskStreamConstants {
      * 重试次数字段
      */
     public static final String FIELD_RETRY_COUNT = "retryCount";
+    public static final String FIELD_MESSAGE_ID = "messageId";
+    public static final String FIELD_DECISION_ID = "decisionId";
+    public static final String FOLLOW_UP_DECISION_STREAM_KEY = "interview:follow-up:stream";
+    public static final String FOLLOW_UP_DECISION_GROUP_NAME = "follow-up-group";
+    public static final String FOLLOW_UP_DECISION_CONSUMER_PREFIX = "follow-up-consumer-";
 
     /**
      * 文档内容字段

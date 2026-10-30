@@ -6,6 +6,7 @@ import interview.guide.modules.interview.messaging.InterviewEvaluationTaskPublis
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -51,7 +52,12 @@ public class InterviewEvaluationRabbitProducer
 
   @Override
   public PublishReceipt publish(String sessionId) {
-    UUID messageId = UUID.randomUUID();
+    return publish(sessionId, UUID.randomUUID());
+  }
+
+  @Override
+  public PublishReceipt publish(String sessionId, UUID messageId) {
+    Objects.requireNonNull(messageId, "messageId");
     var message = new InterviewEvaluationMessage(
         messageId,
         sessionId,
