@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.modules.interview.dynamic.service.DynamicAbilityEvidenceSourceService;
 import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.auth.model.UserRole;
 import interview.guide.modules.auth.model.UserStatus;
@@ -66,7 +67,8 @@ class AbilityEvidenceDerivationServiceTest {
   @Configuration(proxyBeanMethods = false)
   @EntityScan("interview.guide.modules")
   @EnableJpaRepositories("interview.guide.modules")
-  @Import({AbilityEvidenceDerivationService.class, AbilityScorePolicy.class})
+  @Import({AbilityEvidenceDerivationService.class, AbilityScorePolicy.class,
+      DynamicAbilityEvidenceSourceService.class})
   @ImportAutoConfiguration({DataSourceAutoConfiguration.class, HibernateJpaAutoConfiguration.class,
       TransactionAutoConfiguration.class})
   static class TestApplication {

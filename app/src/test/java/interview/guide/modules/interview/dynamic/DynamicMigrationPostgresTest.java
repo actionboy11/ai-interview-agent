@@ -59,7 +59,7 @@ class DynamicMigrationPostgresTest {
         values (?, 0, '原始回答', now(), 'OTHER')
         """, sessionId);
 
-    assertThat(flyway(null).migrate().migrationsExecuted).isOne();
+    assertThat(flyway(null).migrate().migrationsExecuted).isEqualTo(2);
     assertThat(jdbc.queryForObject("select execution_mode from interview_sessions where id = ?",
         String.class, sessionId)).isEqualTo("LEGACY_FIXED");
     assertThat(jdbc.queryForObject("select report_json from interview_sessions where id = ?",
@@ -190,6 +190,60 @@ class DynamicMigrationPostgresTest {
     owner = user();
     sessionId = session(owner);
     runtime(sessionId, owner);
+  }
+
+  @Test
+  @DisplayName("V12 支持来源强制同归属会话类别、唯一性及证据删除级联")
+  void supportingSourcesEnforceProvenanceAndDeletion() {
+    fixture();
+    assertThat(jdbc.queryForList("select tablename from pg_tables where schemaname = 'public'",
+        String.class)).contains("user_ability_evidence_sources");
+    Long anchor = answer(sessionId, owner, 0, UUID.randomUUID());
+    Long support = answer(sessionId, owner, 1, UUID.randomUUID());
+    Long wrongCategory = answer(sessionId, owner, 2, UUID.randomUUID());
+    jdbc.update("update interview_answers set category_key = 'JAVA' where id = ?", wrongCategory);
+    Long otherSession = session(owner);
+    Long wrongSession = answer(otherSession, owner, 0, UUID.randomUUID());
+    UUID otherOwner = user();
+    Long foreignAnswer = answer(session(otherOwner), otherOwner, 0, UUID.randomUUID());
+    Long proposal = jdbc.queryForObject("""
+        insert into ability_profile_proposals (user_id, interview_session_id, skill_id,
+          category_key, proposed_level, proposed_score, status, created_at, version)
+        values (?, ?, 'java-backend', 'OTHER', 'COMPETENT', 70, 'PROPOSED', now(), 0)
+        returning id
+        """, Long.class, owner, sessionId);
+    Long evidence = jdbc.queryForObject("""
+        insert into user_ability_evidence (user_id, interview_session_id, interview_answer_id,
+          proposal_id, skill_id, category_key, question_score, occurred_at)
+        values (?, ?, ?, ?, 'java-backend', 'OTHER', 70, now()) returning id
+        """, Long.class, owner, sessionId, anchor, proposal);
+    String source = """
+        insert into user_ability_evidence_sources
+          (evidence_id, answer_id, user_id, interview_session_id, category_key)
+        values (?, ?, ?, ?, ?)
+        """;
+    jdbc.update(source, evidence, anchor, owner, sessionId, "OTHER");
+    jdbc.update(source, evidence, support, owner, sessionId, "OTHER");
+    assertThatThrownBy(() -> jdbc.update(source, evidence, support, owner, sessionId, "OTHER"))
+        .hasMessageContaining("uk_ability_evidence_source");
+    for (Long invalid : new Long[] {wrongCategory, wrongSession, foreignAnswer}) {
+      assertThatThrownBy(() -> jdbc.update(source, evidence, invalid, owner, sessionId, "OTHER"))
+          .hasMessageContaining("fk_ability_source_answer_scope");
+    }
+    assertThatThrownBy(() -> jdbc.update(source, evidence, wrongSession, owner, otherSession, "OTHER"))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(() -> jdbc.update(source, evidence, foreignAnswer, otherOwner,
+        sessionId, "OTHER")).isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(() -> jdbc.update("delete from interview_answers where id = ?", support))
+        .hasMessageContaining("fk_ability_source_answer_scope");
+    assertThatThrownBy(() -> jdbc.update("delete from interview_sessions where id = ?", sessionId))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    jdbc.update("delete from user_ability_evidence where id = ?", evidence);
+    assertThat(jdbc.queryForObject("select count(*) from user_ability_evidence_sources "
+        + "where evidence_id = ?", Integer.class, evidence)).isZero();
+    jdbc.update("delete from ability_profile_proposals where id = ?", proposal);
+    jdbc.update("delete from interview_answers where session_id = ?", sessionId);
+    jdbc.update("delete from interview_sessions where id = ?", sessionId);
   }
 
   private Flyway flyway(String target) {

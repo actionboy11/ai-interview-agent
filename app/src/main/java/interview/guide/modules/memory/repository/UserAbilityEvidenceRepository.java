@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -15,15 +16,20 @@ public interface UserAbilityEvidenceRepository extends JpaRepository<UserAbility
     long getSessionCount();
   }
 
+  @EntityGraph(attributePaths = "sources")
   Optional<UserAbilityEvidenceEntity> findByOwnerIdAndInterviewAnswerId(UUID ownerId, Long answerId);
 
+  @EntityGraph(attributePaths = "sources")
   List<UserAbilityEvidenceEntity> findByOwnerIdAndProposalId(UUID ownerId, Long proposalId);
 
+  @EntityGraph(attributePaths = "sources")
   List<UserAbilityEvidenceEntity> findByOwnerIdAndInterviewSessionId(UUID ownerId, Long sessionId);
 
+  @EntityGraph(attributePaths = "sources")
   List<UserAbilityEvidenceEntity> findByOwnerIdAndSkillIdAndCategoryKey(
       UUID ownerId, String skillId, String categoryKey);
 
+  @EntityGraph(attributePaths = "sources")
   List<UserAbilityEvidenceEntity> findByOwnerIdAndSkillIdAndCategoryKeyIn(
       UUID ownerId, String skillId, List<String> categoryKeys);
 

@@ -33,6 +33,7 @@ import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.dynamic.service.DynamicInterviewLifecycle;
+import interview.guide.modules.interview.dynamic.service.DynamicAbilityEvidenceSourceService;
 import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
 import interview.guide.modules.interview.dynamic.service.DynamicInterviewProperties;
 import interview.guide.modules.interview.dynamic.service.DynamicInterviewCreationService;
@@ -121,6 +122,7 @@ class UserAbilityMemoryJourneyTest {
   @Import({AdminAccountService.class, AuthService.class, InviteCodeService.class,
       UsernameNormalizer.class, AuthUserQueryService.class, AuthResponseMapperImpl.class,
       CurrentUserProvider.class, AbilityEvidenceDerivationService.class,
+      DynamicAbilityEvidenceSourceService.class,
       AbilityMemoryDeletionService.class, InterviewPersistenceService.class,
       DynamicInterviewLifecycle.class, DynamicInterviewSessionSupport.class,
       DynamicInterviewProperties.class,

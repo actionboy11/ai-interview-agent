@@ -4,6 +4,7 @@ import interview.guide.modules.auth.model.UserEntity;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import jakarta.persistence.Column;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -12,16 +13,22 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.Check;
 
 @Entity
 @Table(name = "user_ability_evidence", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_ability_evidence_answer", columnNames = "interview_answer_id")
+    @UniqueConstraint(name = "uk_ability_evidence_answer", columnNames = "interview_answer_id"),
+    @UniqueConstraint(name = "uk_ability_evidence_scope",
+        columnNames = {"id", "user_id", "interview_session_id", "category_key"})
 }, indexes = {
     @Index(name = "idx_ability_evidence_owner_skill", columnList = "user_id,skill_id,category_key"),
     @Index(name = "idx_ability_evidence_session", columnList = "interview_session_id"),
@@ -34,6 +41,13 @@ public class UserAbilityEvidenceEntity {
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+
+  @Column(name = "slot_id", updatable = false, length = 100)
+  private String slotId;
+
+  @OneToMany(mappedBy = "evidence", cascade = CascadeType.ALL, orphanRemoval = true)
+  @OrderBy("answerId ASC")
+  private List<UserAbilityEvidenceSourceEntity> sources = new ArrayList<>();
 
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "user_id", nullable = false, updatable = false)
