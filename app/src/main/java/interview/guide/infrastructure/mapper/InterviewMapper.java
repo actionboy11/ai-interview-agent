@@ -91,8 +91,16 @@ public interface InterviewMapper {
         List<String> improvements,
         List<Object> referenceAnswers,
         List<InterviewDetailDTO.AnswerDetailDTO> answers,
-        InterviewQuestionCountsDTO counts
+        InterviewQuestionCountsDTO counts,
+        Integer plannedMainQuestionCount
     );
+
+    default InterviewDetailDTO toDetailDTO(InterviewSessionEntity session, List<Object> questions,
+        List<String> strengths, List<String> improvements, List<Object> referenceAnswers,
+        List<InterviewDetailDTO.AnswerDetailDTO> answers, InterviewQuestionCountsDTO counts) {
+      return toDetailDTO(session, questions, strengths, improvements, referenceAnswers, answers,
+          counts, null);
+    }
 
     // ========== InterviewSessionEntity 更新映射 ==========
 
@@ -125,12 +133,22 @@ public interface InterviewMapper {
     @Mapping(target = "mainQuestionCount", source = "counts.mainQuestionCount")
     @Mapping(target = "followUpQuestionCount", source = "counts.followUpQuestionCount")
     InterviewHistoryItemDTO toInterviewHistoryItem(InterviewSessionEntity session,
-        InterviewQuestionCountsDTO counts);
+        InterviewQuestionCountsDTO counts, Integer plannedMainQuestionCount);
 
     @Mapping(target = "mainQuestionCount", source = "counts.mainQuestionCount")
     @Mapping(target = "followUpQuestionCount", source = "counts.followUpQuestionCount")
     SessionListItemDTO toSessionListItem(InterviewSessionEntity session,
-        InterviewQuestionCountsDTO counts);
+        InterviewQuestionCountsDTO counts, Integer plannedMainQuestionCount);
+
+    default InterviewHistoryItemDTO toInterviewHistoryItem(InterviewSessionEntity session,
+        InterviewQuestionCountsDTO counts) {
+      return toInterviewHistoryItem(session, counts, null);
+    }
+
+    default SessionListItemDTO toSessionListItem(InterviewSessionEntity session,
+        InterviewQuestionCountsDTO counts) {
+      return toSessionListItem(session, counts, null);
+    }
 
     default InterviewHistoryItemDTO toInterviewHistoryItem(InterviewSessionEntity session) {
       return toInterviewHistoryItem(session, new InterviewQuestionCountsDTO(null, null));

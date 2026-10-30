@@ -1,6 +1,7 @@
 package interview.guide.modules.interview.model;
 
 import java.util.List;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 
 /**
  * 面试会话DTO
@@ -13,8 +14,19 @@ public record InterviewSessionDTO(
     List<InterviewQuestionDTO> questions,
     SessionStatus status,
     Integer mainQuestionCount,
-    Integer followUpQuestionCount
+    Integer followUpQuestionCount,
+    InterviewExecutionMode executionMode
 ) {
+    public InterviewSessionDTO {
+      if (executionMode == null) { executionMode = InterviewExecutionMode.LEGACY_FIXED; }
+    }
+
+    public InterviewSessionDTO(String sessionId, String resumeText, int totalQuestions,
+        int currentQuestionIndex, List<InterviewQuestionDTO> questions, SessionStatus status,
+        Integer mainQuestionCount, Integer followUpQuestionCount) {
+      this(sessionId, resumeText, totalQuestions, currentQuestionIndex, questions, status,
+          mainQuestionCount, followUpQuestionCount, InterviewExecutionMode.LEGACY_FIXED);
+    }
     public InterviewSessionDTO(String sessionId, String resumeText, int totalQuestions,
         int currentQuestionIndex, List<InterviewQuestionDTO> questions, SessionStatus status) {
       this(sessionId, resumeText, totalQuestions, currentQuestionIndex, questions, status, null, null);

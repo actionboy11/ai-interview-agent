@@ -37,6 +37,7 @@ public class DynamicInterviewCommandService {
   private final DynamicInterviewQueryService queries;
   private final ObjectMapper mapper;
   private final Clock clock;
+  private final DynamicInterviewProperties properties;
 
   @Transactional
   public DynamicSubmissionReceipt submit(UUID ownerId, String sessionId, DynamicSubmitRequest request) {
@@ -95,6 +96,7 @@ public class DynamicInterviewCommandService {
   @Transactional
   public void saveDraft(UUID ownerId, String sessionId, int questionIndex, long expectedVersion,
       String answer) {
+    validateLength(answer);
     var runtime = ownedLock(ownerId, sessionId);
     requireWaiting(runtime, questionIndex, expectedVersion);
     var row = answerRow(runtime, questionIndex);
@@ -142,6 +144,13 @@ public class DynamicInterviewCommandService {
         || (request.submissionIntent() == SubmissionIntent.ANSWER
             && (request.answer() == null || request.answer().isBlank()))) {
       throw invalid("提交参数不合法，普通回答不能为空");
+    }
+    validateLength(request.answer());
+  }
+
+  private void validateLength(String answer) {
+    if (answer != null && answer.length() > properties.getMaxAnswerLength()) {
+      throw invalid("答案长度超过允许上限");
     }
   }
 

@@ -28,6 +28,15 @@ import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.memory.service.AbilityScorePolicy;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
 import interview.guide.modules.interview.dynamic.repository.DynamicInterviewRuntimeRepository;
+import interview.guide.modules.interview.dynamic.service.DynamicAdvancePolicy;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCommandService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCreationService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewProperties;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewQueryService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewTransitionService;
+import interview.guide.modules.interview.dynamic.service.DynamicMainQuestionGenerator;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewLifecycle;
 import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
@@ -68,6 +77,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Bean;
+import java.time.Clock;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -83,6 +94,11 @@ import tools.jackson.databind.ObjectMapper;
     InterviewQuestionPlanPersistenceService.class, InterviewQuestionCountService.class,
     MemoryDerivationPublicationService.class, AbilityMemoryDeletionService.class,
     AbilityScorePolicy.class,
+    DynamicInterviewCreationService.class, DynamicInterviewProperties.class,
+    DynamicInterviewQueryService.class, DynamicInterviewCommandService.class,
+    DynamicInterviewTransitionService.class, DynamicAdvancePolicy.class,
+    DynamicInterviewSessionSupport.class,
+    DynamicInterviewLifecycle.class,
     InterviewHistoryService.class, InterviewSessionCache.class, FileStorageService.class,
     FileHashService.class, FileValidationService.class, TransactionalExecutor.class,
     ResumeMapperImpl.class, InterviewMapperImpl.class, ObjectMapper.class,
@@ -95,6 +111,7 @@ abstract class WorkflowOwnershipTestSupport {
       InterviewEvaluationDeadLetterRepository.class, UserAbilityProfileRepository.class,
       InterviewQuestionPlanRepository.class, DynamicInterviewRuntimeRepository.class})
   static class DeadLetterConfiguration {
+    @Bean Clock clock() { return Clock.systemUTC(); }
   }
 
   @Autowired ResumeAnalysisDeadLetterRepository resumeDeadLetters;
@@ -129,6 +146,7 @@ abstract class WorkflowOwnershipTestSupport {
   @MockitoBean AdaptiveAllocationPolicy allocation;
   @MockitoBean AnswerEvaluationService evaluation;
   @MockitoBean LlmProviderRegistry llm;
+  @MockitoBean DynamicMainQuestionGenerator dynamicGenerator;
   UserEntity first;
   UserEntity second;
   Map<String, Object> cachedValues;

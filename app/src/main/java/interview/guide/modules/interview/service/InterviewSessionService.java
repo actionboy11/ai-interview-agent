@@ -18,6 +18,12 @@ import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
 import interview.guide.modules.interview.model.SubmitAnswerResponse;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCreationService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewProperties;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCommandService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewQueryService;
 import interview.guide.modules.interview.planning.AdaptiveAllocationPolicy;
 import interview.guide.modules.interview.planning.InterviewPlanningContextFactory;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
@@ -63,6 +69,11 @@ public class InterviewSessionService {
     private final AdaptiveAllocationPolicy allocationPolicy;
     private final InterviewQuestionPlanPersistenceService planPersistence;
     private final InterviewQuestionCountService questionCounts;
+    private final DynamicInterviewCreationService dynamicCreation;
+    private final DynamicInterviewProperties dynamicProperties;
+    private final DynamicInterviewSessionSupport dynamicSessions;
+    private final DynamicInterviewCommandService dynamicCommands;
+    private final DynamicInterviewQueryService dynamicQueries;
 
     /**
      * 创建新的面试会话
@@ -71,6 +82,10 @@ public class InterviewSessionService {
      */
     public InterviewSessionDTO createSession(CreateInterviewRequest request) {
         UUID ownerId = currentUser.requireUserId();
+        boolean dynamic = request.executionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP;
+        if (dynamic && !dynamicProperties.isEnabled()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "动态面试尚未开放");
+        }
         String resumeText = request.resumeText();
         if (request.resumeId() != null) {
             resumeText = persistenceService.requireOwnedResume(request.resumeId()).getResumeText();
@@ -83,6 +98,11 @@ public class InterviewSessionService {
                     request.resumeId(), unfinishedOpt.get().sessionId());
                 return unfinishedOpt.get();
             }
+        }
+
+        if (dynamic) {
+            var created = dynamicCreation.create(request);
+            return getSession(created.sessionId());
         }
 
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
@@ -144,7 +164,10 @@ public class InterviewSessionService {
      * 获取会话信息（优先从缓存获取，缓存未命中则从数据库恢复）
      */
     public InterviewSessionDTO getSession(String sessionId) {
-        requireSession(sessionId);
+        var entity = requireSession(sessionId);
+        if (entity.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            return dynamicSessions.restore(entity);
+        }
         // 1. 尝试从 Redis 缓存获取
         Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
         if (cachedOpt.isPresent()) {
@@ -165,12 +188,21 @@ public class InterviewSessionService {
      */
     public Optional<InterviewSessionDTO> findUnfinishedSession(Long resumeId) {
         persistenceService.requireOwnedResume(resumeId);
+        // Persisted status and execution mode must win over any old resume/cache mapping.
+        var persisted = persistenceService.findUnfinishedSession(resumeId);
+        if (persisted.isEmpty()) { return Optional.empty(); }
+        if (persisted.get().getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            return Optional.of(dynamicSessions.restore(persisted.get()));
+        }
         try {
             // 1. 先从 Redis 缓存查找
             Optional<String> cachedSessionIdOpt = sessionCache.findUnfinishedSessionId(resumeId);
             if (cachedSessionIdOpt.isPresent()) {
                 String sessionId = cachedSessionIdOpt.get();
-                requireSession(sessionId);
+                if (!sessionId.equals(persisted.get().getSessionId())) {
+                    return Optional.of(getSession(persisted.get().getSessionId()));
+                }
+                requireLegacySession(sessionId);
                 Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
                 if (cachedOpt.isPresent()) {
                     log.debug("从 Redis 缓存找到未完成会话: resumeId={}, sessionId={}", resumeId, sessionId);
@@ -481,7 +513,7 @@ public class InterviewSessionService {
      * 获取或恢复会话（优先从缓存获取）
      */
     private CachedSession getOrRestoreSession(String sessionId) {
-        requireSession(sessionId);
+        requireLegacySession(sessionId);
         // 1. 尝试从 Redis 缓存获取
         Optional<CachedSession> cachedOpt = sessionCache.getSession(sessionId);
         if (cachedOpt.isPresent()) {
@@ -572,6 +604,14 @@ public class InterviewSessionService {
         for (InterviewSessionEntity session : staleSessions) {
             String sessionId = session.getSessionId();
             try {
+                if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+                    var ownerId = session.getOwner().getId();
+                    var runtime = dynamicQueries.get(ownerId, sessionId);
+                    dynamicCommands.complete(ownerId, sessionId, runtime.version());
+                    dynamicSessions.invalidate(ownerId, sessionId);
+                    cleaned++;
+                    continue;
+                }
                 if (session.getQuestionsJson() == null) {
                     planPersistence.discardShell(sessionId, session.getOwner().getId());
                     sessionCache.deleteSessionInternal(session.getOwner().getId(), sessionId,
@@ -598,7 +638,7 @@ public class InterviewSessionService {
      */
     public void deleteSession(String sessionId) {
         persistenceService.deleteSessionBySessionId(sessionId);
-        sessionCache.deleteSession(sessionId);
+        sessionCache.invalidateSession(currentUser.requireUserId(), sessionId);
         log.info("面试会话已删除并清理缓存: sessionId={}", sessionId);
     }
 
@@ -610,8 +650,12 @@ public class InterviewSessionService {
             .map(InterviewSessionEntity::getSessionId)
             .toList();
         persistenceService.deleteSessionsByResumeId(resumeId);
-        sessionIds.forEach(sessionCache::deleteSession);
-        sessionCache.deleteResumeSessionMapping(resumeId);
+        sessionIds.forEach(id -> sessionCache.invalidateSession(currentUser.requireUserId(), id));
+        try {
+            sessionCache.deleteResumeSessionMapping(resumeId);
+        } catch (RuntimeException failure) {
+            log.warn("清理简历会话缓存失败: resumeId={}", resumeId, failure);
+        }
         log.info("已删除简历 {} 关联的 {} 个面试会话并清理缓存", resumeId, sessionIds.size());
     }
 
@@ -636,5 +680,11 @@ public class InterviewSessionService {
     private InterviewSessionEntity requireSession(String sessionId) {
         return persistenceService.findBySessionId(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
+    }
+
+    private void requireLegacySession(String sessionId) {
+        if (requireSession(sessionId).getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "动态面试请使用动态运行接口");
+        }
     }
 }

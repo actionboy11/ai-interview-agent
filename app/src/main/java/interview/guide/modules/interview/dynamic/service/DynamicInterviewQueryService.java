@@ -40,7 +40,10 @@ public class DynamicInterviewQueryService {
     if (current != null) {
       var answer = answers.findBySession_SessionIdAndQuestionIndex(
           runtime.getSession().getSessionId(), current.questionIndex());
-      if (answer.isPresent()) { current = current.withAnswer(answer.get().getUserAnswer()); }
+      if (answer.isPresent()) {
+        current = current.withSubmission(answer.get().getUserAnswer(),
+            answer.get().getSubmissionIntent());
+      }
     }
     return new DynamicRuntimeSnapshot(runtime.getSession().getSessionId(), runtime.getVersion(),
         runtime.getPhase(), runtime.getPlannedMainQuestionCount(), runtime.getCurrentMainOrdinal() + 1,

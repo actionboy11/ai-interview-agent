@@ -40,7 +40,8 @@ class ResumePersistenceConstraintTest {
     when(repository.saveAndFlush(any())).thenThrow(
         new DataIntegrityViolationException("insert failed", new IllegalStateException(constraint)));
     var service = new ResumePersistenceService(repository, mock(ResumeAnalysisRepository.class),
-        new ObjectMapper(), mock(ResumeMapper.class), new FileHashService(), currentUser, users);
+        new ObjectMapper(), mock(ResumeMapper.class), new FileHashService(), currentUser, users,
+        null, null);
     var file = new MockMultipartFile("file", "resume.txt", "text/plain", new byte[] {1});
 
     assertThatThrownBy(() -> service.saveResume(file, "text", "resumes/key", "url"))

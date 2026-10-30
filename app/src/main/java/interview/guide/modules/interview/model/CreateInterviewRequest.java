@@ -1,6 +1,7 @@
 package interview.guide.modules.interview.model;
 
 import interview.guide.modules.interview.skill.InterviewSkillService.CategoryDTO;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -30,5 +31,13 @@ public record CreateInterviewRequest(
 
     List<CategoryDTO> customCategories,   // 自定义面试的分类（JD 解析结果）
 
-    String jdText                          // JD 原文（自定义面试时作为出题依据）
-) {}
+    String jdText,                         // JD 原文（自定义面试时作为出题依据）
+    InterviewExecutionMode executionMode
+) {
+  public CreateInterviewRequest(String resumeText, int questionCount, Long resumeId,
+      Boolean forceCreate, String llmProvider, String skillId, String difficulty,
+      List<CategoryDTO> customCategories, String jdText) {
+    this(resumeText, questionCount, resumeId, forceCreate, llmProvider, skillId, difficulty,
+        customCategories, jdText, InterviewExecutionMode.LEGACY_FIXED);
+  }
+}

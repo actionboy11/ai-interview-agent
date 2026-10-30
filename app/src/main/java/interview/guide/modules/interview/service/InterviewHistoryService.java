@@ -12,6 +12,8 @@ import interview.guide.modules.interview.model.InterviewDetailDTO;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SessionListItemDTO;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,11 +35,14 @@ public class InterviewHistoryService {
     private final ObjectMapper objectMapper;
     private final InterviewMapper interviewMapper;
     private final InterviewQuestionCountService questionCounts;
+    private final DynamicInterviewSessionSupport dynamicSessions;
 
     public List<SessionListItemDTO> listSessions() {
-      return interviewPersistenceService.findAll().stream()
+      var sessions = interviewPersistenceService.findAll();
+      var planned = dynamicSessions.plannedCounts(sessions);
+      return sessions.stream()
           .map(session -> interviewMapper.toSessionListItem(session,
-              questionCounts.fromJson(session.getQuestionsJson())))
+              questionCounts.fromJson(session.getQuestionsJson()), planned.get(session.getSessionId())))
           .toList();
     }
 
@@ -51,6 +56,7 @@ public class InterviewHistoryService {
         }
 
         InterviewSessionEntity session = sessionOpt.get();
+        Integer plannedCount = dynamicSessions.plannedCounts(List.of(session)).get(sessionId);
 
         // 解析JSON字段
         List<Object> questions = parseJson(session.getQuestionsJson(), new TypeReference<>() {});
@@ -66,11 +72,17 @@ public class InterviewHistoryService {
         } catch (JacksonException e) {
           log.error("转换已解析题目失败，回退到已保存答案", e);
         }
+        if (session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP
+            && allQuestions != null) {
+          allQuestions = dynamicSessions.restoreAnswers(allQuestions, session.getAnswers());
+          questions = objectMapper.convertValue(allQuestions, new TypeReference<>() {});
+        }
 
         // 构建答案详情列表（包含所有题目，未回答的也要显示）
         List<InterviewDetailDTO.AnswerDetailDTO> answerList = buildAnswerDetailList(
             allQuestions,
-            session.getAnswers()
+            session.getAnswers(),
+            session.getExecutionMode() == InterviewExecutionMode.DYNAMIC_FOLLOW_UP
         );
 
         // 使用 MapStruct 组装最终 DTO
@@ -81,7 +93,8 @@ public class InterviewHistoryService {
             improvements,
             referenceAnswers,
             answerList,
-            counts
+            counts,
+            plannedCount
         );
     }
 
@@ -91,7 +104,8 @@ public class InterviewHistoryService {
      */
     private List<InterviewDetailDTO.AnswerDetailDTO> buildAnswerDetailList(
         List<InterviewQuestionDTO> allQuestions,
-        List<InterviewAnswerEntity> answers
+        List<InterviewAnswerEntity> answers,
+        boolean dynamic
     ) {
         if (allQuestions == null || allQuestions.isEmpty()) {
             // 如果没有题目数据，回退到仅显示已回答的题目
@@ -122,7 +136,7 @@ public class InterviewHistoryService {
                         question.type(),
                         question.category(),
                         null,  // userAnswer
-                        question.score() != null ? question.score() : 0,  // score
+                        question.score() != null ? question.score() : (dynamic ? null : 0),
                         question.feedback(),  // feedback
                         null,  // referenceAnswer
                         null,  // keyPoints

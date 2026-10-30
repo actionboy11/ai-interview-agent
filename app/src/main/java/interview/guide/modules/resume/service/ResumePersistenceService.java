@@ -7,6 +7,8 @@ import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.mapper.ResumeMapper;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
+import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.memory.service.AbilityMemoryDeletionService;
 import interview.guide.modules.resume.model.ResumeAnalysisEntity;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeAnalysisRepository;
@@ -41,6 +43,8 @@ public class ResumePersistenceService {
     private final FileHashService fileHashService;
     private final CurrentUserProvider currentUser;
     private final UserRepository userRepository;
+    private final InterviewSessionRepository interviewSessions;
+    private final AbilityMemoryDeletionService memoryDeletion;
     private static final String OWNER_HASH_CONSTRAINT = "uk_resume_owner_hash";
     
     /**
@@ -337,6 +341,10 @@ public class ResumePersistenceService {
         }
         
         ResumeEntity resume = resumeOpt.get();
+        var sessions = interviewSessions.findByOwnerIdAndResumeIdOrderByCreatedAtDesc(
+            currentUser.requireUserId(), id);
+        memoryDeletion.deleteOwnedSessions(currentUser.requireUserId(),
+            sessions.stream().map(session -> session.getId()).toList());
         
         // 1. 删除所有简历分析记录
         List<ResumeAnalysisEntity> analyses = analysisRepository.findByResumeIdOrderByAnalyzedAtDesc(id);

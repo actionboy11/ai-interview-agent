@@ -256,6 +256,17 @@ public class InterviewSessionCache {
         }
     }
 
+    /** Durable dynamic writes succeed even if Redis is unavailable afterwards. */
+    public void invalidateSession(UUID ownerId, String sessionId) {
+        try {
+            String key = SESSION_KEY_PREFIX + ownerId + ":" + sessionId;
+            CachedSession cached = redisService.get(key);
+            deleteSessionInternal(ownerId, sessionId, cached == null ? null : cached.getResumeId());
+        } catch (RuntimeException failure) {
+            log.warn("清理面试缓存失败: sessionId={}", sessionId, failure);
+        }
+    }
+
     private void removeMappingInternal(UUID ownerId, Long resumeId, String sessionId) {
         String key = RESUME_SESSION_KEY_PREFIX + ownerId + ":" + resumeId;
         if (sessionId.equals(redisService.get(key))) {

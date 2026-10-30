@@ -83,6 +83,7 @@ class DynamicInterviewSubmissionTest {
   @Import({DynamicAdvancePolicy.class, DynamicInterviewCommandService.class,
       DynamicInterviewQueryService.class, DynamicInterviewTransitionService.class})
   static class JpaApplication {
+    @Bean DynamicInterviewProperties properties() { return new DynamicInterviewProperties(); }
     @Bean ObjectMapper mapper() { return JsonMapper.builder().build(); }
     @Bean MutableClock clock() { return new MutableClock(); }
   }

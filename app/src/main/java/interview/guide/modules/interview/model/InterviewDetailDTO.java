@@ -2,6 +2,8 @@ package interview.guide.modules.interview.model;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
+import interview.guide.modules.interview.dynamic.model.SubmissionIntent;
 
 /**
  * 面试详情DTO
@@ -23,8 +25,20 @@ public record InterviewDetailDTO(
     List<Object> referenceAnswers,
     List<AnswerDetailDTO> answers,
     Integer mainQuestionCount,
-    Integer followUpQuestionCount
+    Integer followUpQuestionCount,
+    InterviewExecutionMode executionMode,
+    Integer plannedMainQuestionCount
 ) {
+    public InterviewDetailDTO(Long id, String sessionId, Integer totalQuestions, String status,
+        String evaluateStatus, String evaluateError, Integer overallScore, String overallFeedback,
+        LocalDateTime createdAt, LocalDateTime completedAt, List<Object> questions,
+        List<String> strengths, List<String> improvements, List<Object> referenceAnswers,
+        List<AnswerDetailDTO> answers, Integer mainQuestionCount, Integer followUpQuestionCount) {
+      this(id, sessionId, totalQuestions, status, evaluateStatus, evaluateError, overallScore,
+          overallFeedback, createdAt, completedAt, questions, strengths, improvements,
+          referenceAnswers, answers, mainQuestionCount, followUpQuestionCount,
+          InterviewExecutionMode.LEGACY_FIXED, null);
+    }
     public InterviewDetailDTO(Long id, String sessionId, Integer totalQuestions, String status,
         String evaluateStatus, String evaluateError, Integer overallScore, String overallFeedback,
         LocalDateTime createdAt, LocalDateTime completedAt, List<Object> questions,
@@ -49,7 +63,15 @@ public record InterviewDetailDTO(
         String feedback,
         String referenceAnswer,
         List<String> keyPoints,
-        LocalDateTime answeredAt
-    ) {}
+        LocalDateTime answeredAt,
+        SubmissionIntent submissionIntent
+    ) {
+      public AnswerDetailDTO(Integer questionIndex, String question, String category,
+          String categoryKey, String categoryLabel, String userAnswer, Integer score,
+          String feedback, String referenceAnswer, List<String> keyPoints, LocalDateTime answeredAt) {
+        this(questionIndex, question, category, categoryKey, categoryLabel, userAnswer, score,
+            feedback, referenceAnswer, keyPoints, answeredAt, null);
+      }
+    }
 }
 

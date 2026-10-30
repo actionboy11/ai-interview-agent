@@ -9,6 +9,7 @@ import interview.guide.modules.auth.model.UserRole;
 import interview.guide.modules.auth.model.UserStatus;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewLifecycle;
 import interview.guide.modules.memory.model.AbilityLevel;
 import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.model.AbilityProfileStatus;
@@ -54,6 +55,7 @@ class AbilityProfileCommandServiceTest {
   @EntityScan("interview.guide.modules")
   @EnableJpaRepositories("interview.guide.modules")
   @Import({AbilityProfileCommandService.class, AbilityMemoryDeletionService.class,
+      DynamicInterviewLifecycle.class,
       AbilityProfileQueryService.class, AbilityScorePolicy.class})
   @ImportAutoConfiguration({DataSourceAutoConfiguration.class, HibernateJpaAutoConfiguration.class,
       TransactionAutoConfiguration.class})

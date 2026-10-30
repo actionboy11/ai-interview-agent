@@ -18,6 +18,7 @@ import interview.guide.modules.interview.skill.InterviewSkillService.SkillDTO;
 import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.service.ResumeHistoryService;
 import interview.guide.modules.resume.service.ResumePersistenceService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +48,7 @@ class InterviewQuestionCountsResponseTest {
   private final InterviewPersistenceService persistence = mock(InterviewPersistenceService.class);
   private final InterviewSessionCache cache = mock(InterviewSessionCache.class);
   private final InterviewQuestionCountService counts = new InterviewQuestionCountService(json);
+  private final DynamicInterviewSessionSupport dynamicSessions = mock(DynamicInterviewSessionSupport.class);
   private final List<InterviewQuestionDTO> questions = List.of(
       InterviewQuestionDTO.create(4, "主问题", "REDIS", "Redis"),
       InterviewQuestionDTO.create(7, "追问", "REDIS", "Redis", null, true, 4));
@@ -59,7 +61,7 @@ class InterviewQuestionCountsResponseTest {
         "s", "resume", null, questions, 1, SessionStatus.IN_PROGRESS, json)));
     InterviewSessionService service = new InterviewSessionService(null, null, persistence,
         cache, json, null, null, null, null, null, null, null,
-        new InterviewQuestionCountService(json));
+        new InterviewQuestionCountService(json), null, null, null, null, null);
 
     var response = json.valueToTree(service.getSession("s"));
 
@@ -77,7 +79,7 @@ class InterviewQuestionCountsResponseTest {
     when(persistence.findBySessionId("s")).thenReturn(Optional.of(session));
     ObjectMapper jsonSpy = spy(json);
     var service = new InterviewHistoryService(persistence, null, jsonSpy, mapper,
-        new InterviewQuestionCountService(jsonSpy));
+        new InterviewQuestionCountService(jsonSpy), dynamicSessions);
 
     var response = json.valueToTree(service.getInterviewDetail("s"));
 
@@ -104,7 +106,8 @@ class InterviewQuestionCountsResponseTest {
     when(planning.plan(any())).thenReturn(plan);
     when(generator.generateFromPlan(null, skill, "mid", null, plan)).thenReturn(questions);
     var service = new InterviewSessionService(generator, null, persistence, cache, json,
-        null, null, null, currentUser, planning, null, planPersistence, counts);
+        null, null, null, currentUser, planning, null, planPersistence, counts,
+        null, null, null, null, null);
 
     var response = json.valueToTree(service.createSession(new CreateInterviewRequest(
         null, 6, null, true, null, "java-backend", "mid", null, null)));
@@ -125,7 +128,7 @@ class InterviewQuestionCountsResponseTest {
     when(cache.getSession("s")).thenReturn(Optional.empty()).thenReturn(Optional.of(new CachedSession(
         "s", "", null, questions, 1, SessionStatus.IN_PROGRESS, json)));
     var service = new InterviewSessionService(null, null, persistence, cache, json,
-        null, null, null, null, null, null, null, counts);
+        null, null, null, null, null, null, null, counts, null, null, null, null, null);
 
     var response = json.valueToTree(service.getSession("s"));
 
@@ -145,7 +148,7 @@ class InterviewQuestionCountsResponseTest {
     broken.setSessionId("broken");
     broken.setQuestionsJson("broken");
     when(persistence.findAll()).thenReturn(List.of(session, broken));
-    var service = new InterviewHistoryService(persistence, null, json, mapper, counts);
+    var service = new InterviewHistoryService(persistence, null, json, mapper, counts, dynamicSessions);
 
     var response = json.valueToTree(service.listSessions());
 
@@ -170,7 +173,7 @@ class InterviewQuestionCountsResponseTest {
     when(resumes.findAnalysesByResumeId(10L)).thenReturn(List.of());
     when(persistence.findByResumeId(10L)).thenReturn(List.of(entityWithUnloadedAnswers()));
     var service = new ResumeHistoryService(resumes, persistence, null, json,
-        Mappers.getMapper(ResumeMapper.class), mapper, counts);
+        Mappers.getMapper(ResumeMapper.class), mapper, counts, dynamicSessions);
 
     var response = json.valueToTree(service.getResumeDetail(10L)).path("interviews").get(0);
 
@@ -201,7 +204,7 @@ class InterviewQuestionCountsResponseTest {
     var session = entity();
     session.setQuestionsJson("[{\"questionIndex\":4,\"question\":\"Q\",\"score\":{}}]");
     when(persistence.findBySessionId("s")).thenReturn(Optional.of(session));
-    var service = new InterviewHistoryService(persistence, null, json, mapper, counts);
+    var service = new InterviewHistoryService(persistence, null, json, mapper, counts, dynamicSessions);
 
     var response = json.valueToTree(service.getInterviewDetail("s"));
 
@@ -220,7 +223,7 @@ class InterviewQuestionCountsResponseTest {
     var session = entity();
     session.setQuestionsJson(questionsJson);
     when(persistence.findBySessionId("s")).thenReturn(Optional.of(session));
-    var service = new InterviewHistoryService(persistence, null, json, mapper, counts);
+    var service = new InterviewHistoryService(persistence, null, json, mapper, counts, dynamicSessions);
 
     var response = json.valueToTree(service.getInterviewDetail("s"));
 

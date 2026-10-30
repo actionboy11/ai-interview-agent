@@ -2,6 +2,7 @@ package interview.guide.modules.interview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.interview.model.InterviewSessionEntity.SessionStatus;
+import interview.guide.modules.interview.dynamic.model.InterviewExecutionMode;
 
 import java.time.LocalDateTime;
 
@@ -21,8 +22,18 @@ public record SessionListItemDTO(
     LocalDateTime createdAt,
     LocalDateTime completedAt,
     Integer mainQuestionCount,
-    Integer followUpQuestionCount
+    Integer followUpQuestionCount,
+    InterviewExecutionMode executionMode,
+    Integer plannedMainQuestionCount
 ) {
+    public SessionListItemDTO(String sessionId, String skillId, String difficulty, Long resumeId,
+        int totalQuestions, SessionStatus status, AsyncTaskStatus evaluateStatus,
+        String evaluateError, Integer overallScore, LocalDateTime createdAt,
+        LocalDateTime completedAt, Integer mainQuestionCount, Integer followUpQuestionCount) {
+      this(sessionId, skillId, difficulty, resumeId, totalQuestions, status, evaluateStatus,
+          evaluateError, overallScore, createdAt, completedAt, mainQuestionCount,
+          followUpQuestionCount, InterviewExecutionMode.LEGACY_FIXED, null);
+    }
     public SessionListItemDTO(String sessionId, String skillId, String difficulty, Long resumeId,
         int totalQuestions, SessionStatus status, AsyncTaskStatus evaluateStatus,
         String evaluateError, Integer overallScore, LocalDateTime createdAt,

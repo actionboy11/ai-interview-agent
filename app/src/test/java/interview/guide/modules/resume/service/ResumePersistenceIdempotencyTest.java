@@ -43,7 +43,9 @@ class ResumePersistenceIdempotencyTest {
             resumeMapper,
             mock(FileHashService.class),
             mock(CurrentUserProvider.class),
-            mock(UserRepository.class)
+            mock(UserRepository.class),
+            null,
+            null
         );
         resume = new ResumeEntity();
         resume.setId(42L);

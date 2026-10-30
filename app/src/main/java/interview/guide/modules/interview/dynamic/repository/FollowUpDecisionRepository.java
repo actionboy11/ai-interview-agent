@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface FollowUpDecisionRepository extends JpaRepository<FollowUpDecisionEntity, UUID> {
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select d from FollowUpDecisionEntity d where d.session.id in :ids order by d.id")
+  List<FollowUpDecisionEntity> lockForDeletion(@Param("ids") List<Long> ids);
   interface DecisionReference {
     UUID getId();
     String getSessionId();

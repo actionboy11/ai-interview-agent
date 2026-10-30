@@ -32,6 +32,12 @@ import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
 import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewLifecycle;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewSessionSupport;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewProperties;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCreationService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewCommandService;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewQueryService;
 import interview.guide.modules.interview.planning.QuestionPlanningService;
 import interview.guide.modules.interview.planning.model.PlanningMode;
 import interview.guide.modules.interview.planning.model.QuestionPlanningCommand;
@@ -116,6 +122,8 @@ class UserAbilityMemoryJourneyTest {
       UsernameNormalizer.class, AuthUserQueryService.class, AuthResponseMapperImpl.class,
       CurrentUserProvider.class, AbilityEvidenceDerivationService.class,
       AbilityMemoryDeletionService.class, InterviewPersistenceService.class,
+      DynamicInterviewLifecycle.class, DynamicInterviewSessionSupport.class,
+      DynamicInterviewProperties.class,
       InterviewSessionService.class, InterviewQuestionService.class, InterviewQuestionCountService.class,
       InterviewSessionCache.class, InterviewSkillService.class,
       AbilityProfileCommandService.class, AbilityProfileQueryService.class,
@@ -155,6 +163,9 @@ class UserAbilityMemoryJourneyTest {
   @MockitoBean AnswerEvaluationService evaluation;
   @MockitoBean LlmProviderRegistry llm;
   @MockitoBean StructuredOutputInvoker invoker;
+  @MockitoBean DynamicInterviewCreationService dynamicCreation;
+  @MockitoBean DynamicInterviewCommandService dynamicCommands;
+  @MockitoBean DynamicInterviewQueryService dynamicQueries;
   private final ConcurrentLinkedQueue<String> modelPrompts = new ConcurrentLinkedQueue<>();
 
   @BeforeEach

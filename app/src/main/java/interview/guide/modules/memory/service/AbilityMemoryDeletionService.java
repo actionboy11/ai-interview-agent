@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.repository.UserRepository;
 import interview.guide.modules.interview.repository.InterviewSessionRepository;
+import interview.guide.modules.interview.dynamic.service.DynamicInterviewLifecycle;
 import interview.guide.modules.memory.model.AbilityProfileProposalEntity;
 import interview.guide.modules.memory.model.AbilityProfileStatus;
 import interview.guide.modules.memory.model.AbilityProposalStatus;
@@ -35,6 +36,7 @@ public class AbilityMemoryDeletionService {
   private final UserAbilityProfileRepository profiles;
   private final AbilityScorePolicy scores;
   private final UserRepository users;
+  private final DynamicInterviewLifecycle dynamicLifecycle;
 
   /** Removes memory before answers and sessions, then replays only surviving accepted evidence. */
   @Transactional
@@ -45,6 +47,7 @@ public class AbilityMemoryDeletionService {
     users.findByIdForAbilityDecision(ownerId)
         .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND));
     List<Long> uniqueIds = sessionIds.stream().distinct().sorted().toList();
+    dynamicLifecycle.prepareDeletion(ownerId, uniqueIds);
     var owned = sessions.findByOwnerIdAndIdInOrderById(ownerId, uniqueIds);
     if (owned.size() != uniqueIds.size()) {
       throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
