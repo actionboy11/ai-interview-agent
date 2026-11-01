@@ -1,8 +1,10 @@
 // 面试相关类型定义
 
 import type { CategoryDTO } from '../api/skill';
+import type { DynamicGroupEvaluation, InterviewExecutionMode, SubmissionIntent } from './dynamicInterview';
 
 export interface InterviewSession {
+  executionMode?: InterviewExecutionMode;
   sessionId: string;
   resumeText: string;
   totalQuestions: number;
@@ -14,6 +16,7 @@ export interface InterviewSession {
 }
 
 export interface InterviewQuestion {
+  submissionIntent?: SubmissionIntent | null;
   questionIndex: number;
   isFollowUp?: boolean;
   parentQuestionIndex?: number | null;
@@ -43,6 +46,7 @@ export interface QuestionPlanSummary {
 }
 
 export interface CreateInterviewRequest {
+  executionMode?: InterviewExecutionMode;
   resumeText: string;
   questionCount: number;
   resumeId?: number;
@@ -74,9 +78,13 @@ export interface CurrentQuestionResponse {
 }
 
 export interface InterviewReport {
+  executionMode?: InterviewExecutionMode;
+  groupEvaluationSchemaVersion?: number | null;
+  frozenVersion?: number | null;
+  groupEvaluations?: DynamicGroupEvaluation[] | null;
   sessionId: string;
   totalQuestions: number;
-  overallScore: number;
+  overallScore: number | null;
   categoryScores: CategoryScore[];
   questionDetails: QuestionEvaluation[];
   overallFeedback: string;
@@ -89,7 +97,7 @@ export interface CategoryScore {
   category: string;
   categoryKey: string;
   categoryLabel: string;
-  score: number;
+  score: number | null;
   questionCount: number;
 }
 
@@ -99,8 +107,8 @@ export interface QuestionEvaluation {
   category: string;
   categoryKey: string;
   categoryLabel: string;
-  userAnswer: string;
-  score: number;
+  userAnswer: string | null;
+  score: number | null;
   feedback: string;
 }
 

@@ -5,7 +5,7 @@ import {historyApi} from '../api/history';
 import {interviewApi, type TextSessionMeta} from '../api/interview';
 import {voiceInterviewApi, SessionMeta} from '../api/voiceInterview';
 import {formatDate} from '../utils/date';
-import {getScoreProgressColor} from '../utils/score';
+import {averageValidScore, getScoreProgressColor} from '../utils/score';
 import {skillApi, type SkillDTO} from '../api/skill';
 import {getTemplateName} from '../utils/voiceInterview';
 import {formatInterviewQuestionCounts} from '../utils/interviewQuestionCounts';
@@ -51,7 +51,7 @@ interface UnifiedInterviewItem {
 interface InterviewStats {
   totalCount: number;
   completedCount: number;
-  averageScore: number;
+  averageScore: number | null;
 }
 
 function isCompletedStatus(status: string): boolean {
@@ -214,11 +214,10 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
 
       // Compute stats
       const evaluated = all.filter(i => isEvaluateCompleted(i));
-      const totalScore = evaluated.reduce((sum, i) => sum + (i.overallScore || 0), 0);
       const newStats = {
         totalCount: all.length,
         completedCount: evaluated.length,
-        averageScore: evaluated.length > 0 ? Math.round(totalScore / evaluated.length) : 0,
+        averageScore: averageValidScore(evaluated.map(i => i.overallScore)),
       };
       setStats(prev => {
         if (isPolling && prev &&
@@ -410,7 +409,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <StatCard icon={Users} label="面试总数" value={stats.totalCount} color="bg-primary-500" />
           <StatCard icon={CheckCircle} label="已完成" value={stats.completedCount} color="bg-emerald-500" />
-          <StatCard icon={TrendingUp} label="平均分数" value={stats.averageScore} suffix="分" color="bg-indigo-500" />
+          <StatCard icon={TrendingUp} label="平均分数" value={stats.averageScore ?? '未评估'} suffix={stats.averageScore == null ? undefined : '分'} color="bg-indigo-500" />
         </div>
       )}
 
@@ -526,7 +525,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
                       ) : isEvaluateFailed(item) ? (
                         <span className="text-red-500 dark:text-red-400 text-sm" title={item.evaluateError}>失败</span>
                       ) : (
-                        <span className="text-slate-400 dark:text-slate-500">-</span>
+                        <span className="text-slate-400 dark:text-slate-500">{isEvaluateCompleted(item) ? '未评估' : '-'}</span>
                       )}
                     </td>
                     <td className="px-6 py-4">

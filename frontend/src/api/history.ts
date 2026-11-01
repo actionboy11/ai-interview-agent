@@ -1,5 +1,6 @@
 import { request } from './request';
 import type { InterviewQuestion } from '../types/interview';
+import type { DynamicGroupEvaluation, InterviewExecutionMode, SubmissionIntent } from '../types/dynamicInterview';
 
 export type AnalyzeStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export type EvaluateStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -39,6 +40,10 @@ export interface AnalysisItem {
 }
 
 export interface InterviewItem {
+  executionMode?: InterviewExecutionMode;
+  groupEvaluationSchemaVersion?: number | null;
+  frozenVersion?: number | null;
+  groupEvaluations?: DynamicGroupEvaluation[] | null;
   id: number;
   sessionId: string;
   totalQuestions: number;
@@ -58,13 +63,14 @@ export interface InterviewItem {
 }
 
 export interface AnswerItem {
+  submissionIntent?: SubmissionIntent | null;
   questionIndex: number;
   question: string;
   category: string;
   categoryKey?: string;
   categoryLabel?: string;
-  userAnswer: string;
-  score: number;
+  userAnswer: string | null;
+  score: number | null;
   feedback: string;
   referenceAnswer?: string;
   keyPoints?: string[];

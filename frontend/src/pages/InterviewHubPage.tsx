@@ -101,6 +101,7 @@ export default function InterviewHubPage() {
         state: {
           resumeId: config.resumeId,
           interviewConfig: {
+            executionMode: 'DYNAMIC_FOLLOW_UP',
             skillId: config.skillId,
             skillName,
             difficulty: config.difficulty,
@@ -407,7 +408,7 @@ export default function InterviewHubPage() {
                         </button>
                       ))}
                     </div>
-                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">追问另计，数量以实际生成为准。</p>
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">追问按回答动态生成，最多每题2次且整场不超过主问题数。</p>
                   </div>
                 )}
 

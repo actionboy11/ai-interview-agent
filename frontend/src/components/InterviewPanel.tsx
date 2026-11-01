@@ -61,7 +61,7 @@ export default function InterviewPanel({
       .filter(i => i.overallScore !== null)
       .map((interview) => ({
         name: formatDateOnly(interview.createdAt),
-        score: interview.overallScore || 0,
+        score: interview.overallScore,
         index: interviews.length - interviews.indexOf(interview)
       }))
       .reverse();
@@ -235,7 +235,7 @@ function InterviewItemCard({
           ? getScoreColor(interview.overallScore, [85, 70])
             : 'bg-slate-100 dark:bg-slate-600 text-slate-400'
       }`}>
-        {interview.overallScore ?? '-'}
+        {interview.overallScore ?? '未评估'}
       </div>
 
       {/* 信息 */}

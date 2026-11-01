@@ -9,6 +9,7 @@ import { Loader2 } from 'lucide-react';
 import { ROUTES } from './constants/routes';
 import { AuthProvider } from './hooks/useAuth';
 import ProtectedRoute from './components/ProtectedRoute';
+import type { InterviewExecutionMode } from './types/dynamicInterview';
 
 // Lazy load components
 const UploadPage = lazy(() => import('./pages/UploadPage'));
@@ -92,6 +93,7 @@ interface InterviewEntryState {
   resumeText?: string;
   sessionIdToResume?: string;
   interviewConfig?: {
+    executionMode?: InterviewExecutionMode;
     skillId?: string;
     difficulty?: Difficulty;
     questionCount?: number;
@@ -159,6 +161,7 @@ function InterviewWrapper() {
 
   return (
     <Interview
+      key={entryState.sessionIdToResume ?? effectiveResumeId ?? 'new'}
       resumeText={resumeText}
       resumeId={effectiveResumeId}
       sessionIdToResume={entryState.sessionIdToResume}

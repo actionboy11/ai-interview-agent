@@ -38,6 +38,9 @@ export interface AbilityProposal {
 }
 
 export interface AbilityEvidence {
+  interviewAnswerId?: number | null;
+  slotId?: string | null;
+  supportingAnswerIds?: number[];
   id: number;
   interviewSessionId: string;
   proposalId: number;

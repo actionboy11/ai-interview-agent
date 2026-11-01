@@ -6,12 +6,14 @@ import {
 } from 'lucide-react';
 import { useInterviewConfig, CUSTOM_SKILL_ID, DIFFICULTY_OPTIONS, type InterviewMode, type Difficulty } from '../hooks/useInterviewConfig';
 import { getSkillIcon } from '../utils/skillIcons';
+import type { InterviewExecutionMode } from '../types/dynamicInterview';
 
 // Re-export for backward compatibility
 export type { InterviewMode, Difficulty };
 export { DIFFICULTY_OPTIONS };
 
 export interface UnifiedInterviewConfig {
+  executionMode?: InterviewExecutionMode;
   mode: InterviewMode;
   skillId: string;
   skillName: string;
@@ -74,6 +76,7 @@ export default function UnifiedInterviewModal({
     }
 
     onStart({
+      executionMode: config.mode === 'text' ? 'DYNAMIC_FOLLOW_UP' : undefined,
       mode: config.mode,
       skillId: config.skillId,
       skillName: selectedSkill?.name || '自定义',
@@ -407,7 +410,7 @@ export default function UnifiedInterviewModal({
                               </button>
                             ))}
                           </div>
-                          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">追问另计，数量以实际生成为准。</p>
+                          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">追问按回答动态生成，最多每题2次且整场不超过主问题数。</p>
                         </div>
                       )}
 

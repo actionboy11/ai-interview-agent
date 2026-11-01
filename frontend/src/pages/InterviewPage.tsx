@@ -9,6 +9,8 @@ import type {InterviewQuestion, InterviewSession, QuestionPlanSummary} from '../
 import type {Difficulty} from '../components/UnifiedInterviewModal';
 import type {CategoryDTO} from '../api/skill';
 import { CUSTOM_SKILL_ID } from '../hooks/useInterviewConfig';
+import DynamicInterviewPanel from '../components/DynamicInterviewPanel';
+import type { InterviewExecutionMode } from '../types/dynamicInterview';
 
 interface Message {
   type: 'interviewer' | 'user';
@@ -22,6 +24,7 @@ interface InterviewProps {
   resumeId?: number;
   sessionIdToResume?: string;
   initialConfig?: {
+    executionMode?: InterviewExecutionMode;
     questionCount?: number;
     llmProvider?: string;
     skillId?: string;
@@ -83,6 +86,7 @@ export default function Interview({
 
     try {
       const newSession = await interviewApi.createSession({
+        executionMode: initialConfig?.executionMode ?? 'DYNAMIC_FOLLOW_UP',
         resumeText,
         questionCount,
         resumeId,
@@ -96,7 +100,7 @@ export default function Interview({
 
       initSession(newSession);
     } catch (err) {
-      setError('创建面试失败，请重试');
+      setError(err instanceof Error ? err.message : '创建面试失败，请重试');
       console.error(err);
     } finally {
       setIsCreating(false);
@@ -126,6 +130,7 @@ export default function Interview({
 
   const initSession = (s: InterviewSession) => {
     setSession(s);
+    if (s.executionMode === 'DYNAMIC_FOLLOW_UP') return;
     void loadPlan(s.sessionId);
 
     if (s.questions.length > 0) {
@@ -244,7 +249,7 @@ export default function Interview({
           <p className="text-red-500 dark:text-red-400 mb-4">{error}</p>
           <div className="flex gap-3 justify-center">
             <button
-              onClick={startInterview}
+              onClick={() => sessionIdToResume ? void resumeExistingSession(sessionIdToResume) : void startInterview()}
               className="px-5 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
             >
               重试
@@ -261,6 +266,8 @@ export default function Interview({
     );
   }
 
+  if (session?.executionMode === 'DYNAMIC_FOLLOW_UP') return <DynamicInterviewPanel key={session.sessionId}
+    session={session} onBack={onBack} onComplete={onInterviewComplete} />;
   if (!session || !currentQuestion) return null;
 
   return (

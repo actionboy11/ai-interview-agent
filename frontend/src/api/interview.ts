@@ -1,4 +1,5 @@
 import { request } from './request';
+import type { InterviewExecutionMode } from '../types/dynamicInterview';
 import type {
   CreateInterviewRequest,
   CurrentQuestionResponse,
@@ -10,6 +11,7 @@ import type {
 } from '../types/interview';
 
 export interface TextSessionMeta {
+  executionMode?: InterviewExecutionMode;
   sessionId: string;
   skillId: string;
   difficulty: string;
@@ -45,8 +47,8 @@ export const interviewApi = {
   /**
    * 获取会话信息
    */
-  async getSession(sessionId: string): Promise<InterviewSession> {
-    return request.get<InterviewSession>(`/api/interview/sessions/${sessionId}`);
+  async getSession(sessionId: string, signal?: AbortSignal): Promise<InterviewSession> {
+    return request.get<InterviewSession>(`/api/interview/sessions/${sessionId}`, { signal });
   },
 
   async getPlan(sessionId: string): Promise<QuestionPlanSummary> {

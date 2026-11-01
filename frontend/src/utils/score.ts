@@ -8,7 +8,8 @@
  * @param maxScore 满分
  * @returns 百分比 (0-100)
  */
-export function calculatePercentage(score: number, maxScore: number): number {
+export function calculatePercentage(score: number | null, maxScore: number): number {
+  if (score == null) return 0;
   if (maxScore === 0) return 0;
   return Math.round((score / maxScore) * 100);
 }
@@ -43,10 +44,11 @@ function isDarkMode(): boolean {
  * @returns Tailwind CSS 颜色类名
  */
 export function getScoreColor(
-  score: number,
+  score: number | null | undefined,
   thresholds: [number, number] = [80, 70]
 ): string {
   const dark = isDarkMode();
+  if (score == null) return 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400';
 
   if (dark) {
     // 深色模式：使用更柔和的颜色
@@ -65,9 +67,10 @@ export function getScoreColor(
  * 根据分数获取进度条颜色类名（用于进度条）
  */
 export function getScoreProgressColor(
-  score: number,
+  score: number | null,
   thresholds: [number, number] = [80, 70]
 ): string {
+  if (score == null) return 'bg-slate-300';
   if (score >= thresholds[0]) return 'bg-emerald-500';
   if (score >= thresholds[1]) return 'bg-amber-500';
   return 'bg-red-500';
@@ -77,10 +80,20 @@ export function getScoreProgressColor(
  * 根据分数获取文本颜色类名
  */
 export function getScoreTextColor(
-  score: number,
+  score: number | null,
   thresholds: [number, number] = [80, 70]
 ): string {
+  if (score == null) return 'text-slate-500';
   if (score >= thresholds[0]) return 'text-emerald-500';
   if (score >= thresholds[1]) return 'text-amber-500';
   return 'text-red-500';
+}
+
+export function formatScore(score: number | null | undefined): string {
+  return score == null ? '未评估' : String(score);
+}
+
+export function averageValidScore(scores: Array<number | null | undefined>): number | null {
+  const valid = scores.filter((score): score is number => typeof score === 'number' && Number.isFinite(score));
+  return valid.length ? Math.round(valid.reduce((sum, score) => sum + score, 0) / valid.length) : null;
 }

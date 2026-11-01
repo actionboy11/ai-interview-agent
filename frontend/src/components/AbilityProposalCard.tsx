@@ -121,6 +121,9 @@ export default function AbilityProposalCard({ proposal, sessionId, onDecision, o
             <li key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-700/40">
               <div className="flex flex-wrap justify-between gap-2 text-slate-700 dark:text-slate-200"><span>{item.topicSummary}</span><span>原始得分 {item.questionScore}</span></div>
               {item.feedbackSummary && <p className="mt-1 text-slate-500 dark:text-slate-400">{item.feedbackSummary}</p>}
+              {item.interviewAnswerId != null && <p className="mt-1 break-all text-xs text-slate-500">主回答 ID：{item.interviewAnswerId}</p>}
+              {item.slotId && <p className="mt-1 break-all text-xs text-slate-500">主问题组：{item.slotId}</p>}
+              {!!item.supportingAnswerIds?.length && <p className="mt-1 break-all text-xs text-slate-500">支持回答 ID：{item.supportingAnswerIds.join('、')}</p>}
               <Link to={ROUTES.interviewDetail(item.interviewSessionId)} className="mt-1 inline-flex items-center gap-1 text-primary-600 hover:underline">查看来源面试 <ExternalLink className="h-3 w-3" /></Link>
             </li>
           ))}

@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
-import {getScoreColor} from '../utils/score';
+import {formatScore, getScoreColor} from '../utils/score';
 import type {AnswerItem, InterviewDetail} from '../api/history';
 import {formatInterviewQuestionCounts, getInterviewFollowUpLabel} from '../utils/interviewQuestionCounts';
 import {memoryApi} from '../api/memory';
@@ -87,6 +87,15 @@ export default function InterviewDetailPanel({ interview }: InterviewDetailPanel
       />
 
       <p className="text-sm text-slate-600 dark:text-slate-300">{formatInterviewQuestionCounts(interview)}</p>
+      {interview.executionMode === 'DYNAMIC_FOLLOW_UP' && <section className="rounded-xl bg-white p-5 dark:bg-slate-800">
+        <h3 className="font-semibold">主问题组评估</h3>
+        <p className="mt-2 text-sm text-slate-500">主问题及其追问合为一组，各组等权计分；无有效证据显示未评估，不计入平均分。系统故障不会扣分。</p>
+        {interview.groupEvaluations?.map(group => <div key={group.slotId} className="mt-4 border-t border-slate-100 pt-3">
+          <p className="break-all">组 {group.slotId} · {formatScore(group.score)}</p>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{group.evidenceSummary}</p>
+          <p className="mt-1 text-xs text-slate-500">支持作答索引：{group.supportingQuestionIndexes.join('、') || '暂无'}</p>
+        </div>)}
+      </section>}
 
       <AbilityProposalsSection sessionId={interview.sessionId} evaluationStatus={interview.evaluateStatus} evaluationError={interview.evaluateError} />
 
@@ -213,7 +222,7 @@ function ScoreCard({
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.5 }}
             >
-              {score ?? '-'}
+              {formatScore(score)}
             </motion.span>
             <span className="text-sm text-white/70">总分</span>
           </div>
@@ -221,7 +230,7 @@ function ScoreCard({
 
         <h3 className="text-2xl font-bold mb-3">面试评估</h3>
         <p className="text-white/90 max-w-2xl leading-relaxed">
-          {feedback || '表现良好，展示了扎实的技术基础。'}
+          {feedback || (score == null ? '暂无有效评分证据。' : '暂无评估反馈。')}
         </p>
       </div>
     </div>
@@ -358,7 +367,7 @@ function QuestionCard({
             {answer.category || '综合'}
           </span>
           <span className={`font-semibold ${getScoreColor(answer.score, [80, 60])}`}>
-            得分: {answer.score}
+            得分: {formatScore(answer.score)}
           </span>
         </div>
           <motion.svg
@@ -402,7 +411,7 @@ function QuestionCard({
                     ? 'text-red-500 font-medium'
                       : 'text-slate-700 dark:text-slate-300'
                 }`}>
-                  "{answer.userAnswer || '(未回答)'}"
+                  "{answer.submissionIntent === 'DONT_KNOW' ? '我不会' : answer.submissionIntent === 'SKIP' ? '已跳过本题' : answer.userAnswer || '(未回答)'}"
                 </p>
               </div>
 
