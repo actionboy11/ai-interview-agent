@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
+import { ResultError } from './requestError.ts';
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -91,7 +92,7 @@ export function getResultError(value: unknown): Error | null {
     return null;
   }
   notifyAuthFailure(value.code);
-  return new Error(value.message || '请求失败');
+  return new ResultError(value.code, value.message || '请求失败');
 }
 
 function parseResultText(text: string): Result | null {
@@ -153,7 +154,7 @@ async function getErrorFromResponseData(data: unknown): Promise<Error | null> {
   }
 
   notifyAuthFailure(result.code);
-  return new Error(result.message || '请求失败');
+  return new ResultError(result.code, result.message || '请求失败');
 }
 
 /**

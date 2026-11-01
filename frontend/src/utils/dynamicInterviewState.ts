@@ -1,4 +1,5 @@
 import type { DynamicInterviewApi, DynamicRuntimeSnapshot, DynamicSubmitRequest, SubmissionIntent } from '../types/dynamicInterview.ts';
+import { ResultError } from '../api/requestError.ts';
 
 export function acceptSnapshot(sessionId: string, current: DynamicRuntimeSnapshot | null, next: DynamicRuntimeSnapshot) {
   return next.sessionId !== sessionId || (current && next.version < current.version) ? current : next;
@@ -26,6 +27,7 @@ export class DynamicInterviewController {
   private readonly store?: PendingStore;
   private state: State = { runtime: null, busy: false, uncertain: false, error: '', draftStatus: 'idle' };
   private pending: DynamicSubmitRequest | null;
+  private rejection: { version: number; message: string } | null = null;
   private active = true;
   private abort = new AbortController();
   private listeners = new Set<() => void>();
@@ -54,7 +56,8 @@ export class DynamicInterviewController {
       this.pending = null;
       this.store?.write(null);
     }
-    this.publish({ runtime, uncertain: Boolean(this.pending), error: '' });
+    if (this.rejection && runtime.version !== this.rejection.version) this.rejection = null;
+    this.publish({ runtime, uncertain: Boolean(this.pending), error: this.rejection?.message ?? '' });
   }
   canAnswer() {
     return this.active && !this.state.busy && !this.pending
@@ -82,6 +85,7 @@ export class DynamicInterviewController {
   private async sendPending() {
     if (!this.active || !this.pending || this.state.busy) return;
     const body = this.pending;
+    this.rejection = null;
     this.draftRevision += 1;
     this.publish({ busy: true, error: '', draftStatus: 'idle' });
     try {
@@ -93,7 +97,17 @@ export class DynamicInterviewController {
       this.receive(receipt.runtime);
       this.publish({ uncertain: false });
     } catch (error) {
-      this.publish({ uncertain: true, error: `${error instanceof Error ? error.message : '连接中断'}。提交结果尚未确认，请恢复查询或安全重试。` });
+      if (!this.active) return;
+      // Only the validated BAD_REQUEST Result is known to precede a committed answer.
+      // Server/internal errors can follow a commit, so retain their idempotency identity.
+      if (error instanceof ResultError && error.code === 400) {
+        this.pending = null;
+        this.store?.write(null);
+        this.rejection = { version: body.expectedVersion, message: error.message };
+        this.publish({ uncertain: false, error: error.message });
+      } else {
+        this.publish({ uncertain: true, error: `${error instanceof Error ? error.message : '连接中断'}。提交结果尚未确认，请恢复查询或安全重试。` });
+      }
     } finally { this.publish({ busy: false }); }
   }
   async retry() {

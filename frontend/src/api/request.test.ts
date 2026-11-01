@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AxiosHeaders, type AxiosAdapter } from 'axios';
+import { AxiosError, AxiosHeaders, type AxiosAdapter } from 'axios';
 import request, { clearCsrfToken, getCsrfHeaders, subscribeAuthFailure } from './request.ts';
 
 const responseAdapter = (code: number, data: unknown = null): AxiosAdapter => async config => ({
@@ -90,4 +90,28 @@ test('CSRF 初始化失败时不提交写请求并保留服务端错误', async 
   };
   await assert.rejects(request.post('/api/admin/users'), /安全令牌暂不可用/);
   assert.deepEqual(calls, ['/api/auth/csrf']);
+});
+
+test('Result错误保留业务code且兼容Error消息，包括HTTP异常中的JSON与Blob', async () => {
+  const assertCode = (code: number) => (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, '服务端拒绝');
+    assert.equal((error as Error & { code?: number }).code, code);
+    return true;
+  };
+  for (const code of [400, 500, 19999]) {
+    request.getInstance().defaults.adapter = async config => ({ data: { code, message: '服务端拒绝', data: null },
+      status: 200, statusText: 'OK', headers: {}, config });
+    await assert.rejects(request.get('/synthetic'), assertCode(code));
+  }
+  for (const blob of [false, true]) {
+    request.getInstance().defaults.adapter = async config => {
+      const result = { code: 400, message: '服务端拒绝', data: null };
+      throw new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, undefined, {
+        data: blob ? new Blob([JSON.stringify(result)], { type: 'application/json' }) : result,
+        status: 400, statusText: 'Bad Request', headers: {}, config,
+      });
+    };
+    await assert.rejects(request.get('/synthetic'), assertCode(400));
+  }
 });

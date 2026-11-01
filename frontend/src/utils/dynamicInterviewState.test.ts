@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DynamicInterviewController, acceptSnapshot, mainProgress } from './dynamicInterviewState.ts';
-import type { DynamicRuntimeSnapshot, DynamicSubmitRequest } from '../types/dynamicInterview.ts';
+import type { DynamicRuntimeSnapshot, DynamicSubmissionReceipt, DynamicSubmitRequest } from '../types/dynamicInterview.ts';
+import request, { clearCsrfToken, getResultError } from '../api/request.ts';
 
 const snapshot = (patch: Partial<DynamicRuntimeSnapshot> = {}): DynamicRuntimeSnapshot => ({
   sessionId: 's1', version: 4, phase: 'WAITING_ANSWER', plannedMainQuestionCount: 3,
@@ -147,4 +148,82 @@ test('refresh restoration reuses persisted pending request before any new intent
   await c.retry();
   assert.deepEqual(f.sent[0], body);
   assert.equal(stored, null);
+});
+
+test('明确400拒绝解除持久锁，查询保留提示，刷新恢复后可修改答案或结束当前题', async () => {
+  for (const recovery of ['ANSWER', 'DONT_KNOW', 'SKIP', 'COMPLETE'] as const) {
+    clearCsrfToken();
+    let stored: DynamicSubmitRequest | null = null;
+    const sent: DynamicSubmitRequest[] = [];
+    let completions = 0;
+    request.getInstance().defaults.adapter = async config => {
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      let data: unknown;
+      let code = 200;
+      let message = 'success';
+      if (config.url === '/api/auth/csrf') data = { headerName: 'X-CSRF', token: 'synthetic' };
+      else {
+        sent.push(body);
+        if (body.answer.length > 20000) { code = 400; message = '答案长度超过允许上限'; data = null; }
+        else data = { requestId: body.requestId, decisionId: 'd1', runtime: snapshot({ version: 5, phase: 'DECISION_PENDING' }) };
+      }
+      return { data: { code, message, data }, status: 200, statusText: 'OK', headers: {}, config };
+    };
+    const api = { ...fixture().controller.api,
+      submit: (_id: string, body: DynamicSubmitRequest) => request.post<DynamicSubmissionReceipt>('/synthetic/answers', body),
+      complete: async () => { completions += 1; return snapshot({ version: 6, phase: 'COMPLETED' }); },
+    };
+    const store = { read: () => stored, write: (body: DynamicSubmitRequest | null) => { stored = body; } };
+    const first = new DynamicInterviewController('s1', api, () => 'rejected-id', store);
+    await first.refresh();
+    await first.submit('ANSWER', 'x'.repeat(20001));
+    assert.equal(first.canAnswer(), true);
+    assert.equal(first.getSnapshot().uncertain, false);
+    assert.equal(stored, null);
+    await first.refresh();
+    assert.match(first.getSnapshot().error, /答案长度超过允许上限/);
+    first.dispose();
+    const restored = new DynamicInterviewController('s1', api, () => 'corrected-id', store);
+    await restored.refresh();
+    assert.equal(restored.canAnswer(), true);
+    if (recovery === 'COMPLETE') {
+      await restored.complete();
+      assert.equal(completions, 1);
+      assert.equal(restored.getSnapshot().runtime?.phase, 'COMPLETED');
+    } else {
+      await restored.submit(recovery, recovery === 'ANSWER' ? '改短后的回答' : '');
+      assert.deepEqual(sent[1], { requestId: 'corrected-id', questionIndex: 7, expectedVersion: 4,
+        submissionIntent: recovery, answer: recovery === 'ANSWER' ? '改短后的回答' : '' });
+      assert.equal(restored.getSnapshot().runtime?.phase, 'DECISION_PENDING');
+    }
+    restored.dispose();
+  }
+});
+
+test('500与未知业务错误以及断网跨刷新继续保留原提交，不按错误文案判断', async () => {
+  for (const failure of [getResultError({ code: 500, message: '答案长度超过允许上限', data: null }),
+    getResultError({ code: 19999, message: '答案长度超过允许上限', data: null }), new Error('网络连接失败')]) {
+    let stored: DynamicSubmitRequest | null = null;
+    const sent: DynamicSubmitRequest[] = [];
+    let fail = true;
+    const api = { ...fixture().controller.api, submit: async (_id: string, body: DynamicSubmitRequest) => {
+      sent.push(structuredClone(body));
+      if (fail) throw failure;
+      return { requestId: body.requestId, decisionId: 'd1', runtime: snapshot({ version: 5, phase: 'DECISION_PENDING' }) };
+    } };
+    const store = { read: () => stored, write: (body: DynamicSubmitRequest | null) => { stored = body; } };
+    const first = new DynamicInterviewController('s1', api, () => 'original-id', store);
+    await first.refresh(); await first.submit('ANSWER', '原始正文');
+    assert.equal(first.canAnswer(), false);
+    assert.equal(first.getSnapshot().uncertain, true);
+    first.dispose();
+    const restored = new DynamicInterviewController('s1', api, () => 'must-not-use-new-id', store);
+    await restored.refresh();
+    assert.equal(restored.canAnswer(), false);
+    fail = false;
+    await restored.retry();
+    assert.deepEqual(sent[1], sent[0]);
+    assert.equal(stored, null);
+    restored.dispose();
+  }
 });
