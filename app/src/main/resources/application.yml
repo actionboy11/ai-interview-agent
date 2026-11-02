@@ -207,7 +207,7 @@ app:
   interview:
     follow-up-count: ${APP_INTERVIEW_FOLLOW_UP_COUNT:1}
     dynamic:
-      enabled: false
+      enabled: ${APP_INTERVIEW_DYNAMIC_ENABLED:true}
       max-follow-ups-per-main: 2
       decision-timeout: 30s
       max-answer-length: 20000

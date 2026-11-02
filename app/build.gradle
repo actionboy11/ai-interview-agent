@@ -117,6 +117,8 @@ tasks.named('test') {
     useJUnitPlatform()
     // Some H2 JPA slices do not activate the test profile. PostgreSQL migration tests opt in.
     systemProperty 'spring.flyway.enabled', 'false'
+    // Only disposable infrastructure fixtures opt in; never start recovery against local Redis.
+    systemProperty 'app.interview.dynamic.enabled', 'false'
 }
 
 // 将仓库根目录 .env 注入 bootRun，便于本地加载 AI_BAILIAN_API_KEY 等变量（Gradle 进程默认不读 .env）

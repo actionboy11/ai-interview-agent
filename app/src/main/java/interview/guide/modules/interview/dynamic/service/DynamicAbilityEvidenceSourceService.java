@@ -57,6 +57,10 @@ public class DynamicAbilityEvidenceSourceService {
     var report = mapper.readValue(session.getReportJson(), InterviewReportDTO.class);
     DynamicInterviewEvaluationService.validateReport(snapshot, report);
     var current = answers.findBySession_SessionIdOrderByQuestionIndex(sessionId).stream()
+        // Drafts and unobserved report placeholders are not frozen formal submissions.
+        // Partial submission metadata must still fail the strict source comparison below.
+        .filter(answer -> answer.getRequestId() != null || answer.getSubmissionOwnerId() != null
+            || answer.getSubmissionIntent() != null || answer.getRequestFingerprint() != null)
         .collect(Collectors.toMap(InterviewAnswerEntity::getId, Function.identity()));
     if (current.size() != frozen.answers().size()) { throw invalid(); }
     for (var source : frozen.answers()) {
